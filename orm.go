@@ -419,6 +419,40 @@ func (orm *ORM) ToData(result interface{}, flat bool) error {
 	return toData(orm.ctx, orm.db, orm.tx, &q, result, flat)
 }
 
+// Exist 检查数据是否存在
+func (orm *ORM) Exist() (bool, error) {
+	if !orm.keepQuery {
+		defer func() {
+			orm.ClearCache()
+		}()
+	}
+
+	q := BaseQuery{
+		RefConf:          orm.ref,
+		TableName:        orm.tableName,
+		Where:            orm.Q.Where,
+		SelectColLinkStr: orm.selectColLinkStr,
+		Order:            orm.Q.Order,
+		Distinct:         orm.Q.Distinct,
+		SelectForUpdate:  orm.Q.SelectForUpdate,
+		Limit:            Limit{1},
+		Select:           Select{"id"},
+		GroupBy:          orm.Q.GroupBy,
+		Having:           orm.Q.Having,
+	}
+
+	var c int64
+	err := toData(orm.ctx, orm.db, orm.tx, &q, &c, false)
+	if err != nil {
+		return false, err
+	}
+
+	if c > 0 {
+		return true, nil
+	}
+	return false, nil
+}
+
 func (orm *ORM) Count(clearCache bool) (int64, error) {
 	if clearCache {
 		defer func() {

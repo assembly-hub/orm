@@ -59,6 +59,11 @@ func main() {
 		// 含义：select * from table1 left join table2 left join table3 where table3.id > 1
 		"tb2.tb3.id__gt": 1,
 	})
+
+	exist, err := tb1.Exist()
+	if err != nil {
+		fmt.Println(exist, err.Error())
+	}
 	/**
 	where 条件 支持子查询 MySqlQuery or *MySqlQuery
 	= : "key": "val" or "key__eq": "val" or "key__bin_eq": "val"
@@ -129,9 +134,9 @@ func main() {
 		"tb2_ref": 0
 	}
 	*/
-	err := tb1.ToData(&data, false)
+	err = tb1.ToData(&data, false)
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 
 	dt := map[string]interface{}{
@@ -141,7 +146,7 @@ func main() {
 	// 参数可以是 map 或 table1 struct，当id == nil or id == "" or id == 0 将忽略id字段，否则将插入
 	_, err = tb1.InsertOne(dt)
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 
 	insertList := []interface{}{}
@@ -149,7 +154,7 @@ func main() {
 	// 参数2：是否采用事务的方式，true采用事务，false不采用
 	_, _, err = tb1.InsertMany(insertList, true)
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 
 	updateData := map[string]interface{}{
@@ -171,7 +176,7 @@ func main() {
 	// 自定义更新条件
 	_, err = tb1.UpdateByWhere(upData, upWhere)
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 
 	// 调用 ToData 之后的条件是否保持，true：保持，false：不保持，orm 默认保持
@@ -189,7 +194,7 @@ func main() {
 	// tb1.Distinct(b)
 	pageData, err := tb1.PageData(&data, false, 1, 10)
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 
 	fmt.Println(pageData)
