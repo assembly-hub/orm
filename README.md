@@ -6,40 +6,37 @@ mysql、mongo orm工具，提供丰富的CURD的功能，将sql的研发编写�
 ### mysql
 #### where、order、group、having等语法
 ```
-where 条件 支持子查询 MySqlQuery or *MySqlQuery
-= : "key": "val" or "key__eq": "val" or "key__bin_eq": "val"
-< : "key__lt": 1 or "key__bin_lt": 1
-<= : "key__lte": 1 or "key__bin_lte": 1
-> : "key__gt": 1 or "key__bin_gt": 1
->= : "key__gte": 1 or "key__bin_gte": 1
-!= : "key__ne": 1 or "key__bin_ne": 1
-in : "key__in": [1] or "key__bin_in": [1]
-not in : "key__nin": [1] or "key__bin_nin": [1]
-date : "key__date": "2022-01-01"
-between : "key__between": [1, 2]
+    每种算子均支持 强制忽略大小写查询和强制区分大小写查询，用法为：key__ignore_eq，key__bin_eq 或简写 key__i_eq，key__b_eq
+	where 条件 支持子查询
+	= : "key": "val" or "key__eq": "val"
+	< : "key__lt": 1
+	<= : "key__lte": 1
+	> : "key__gt": 1
+	>= : "key__gte": 1
+	!= : "key__ne": 1
+	in : "key__in": [1]
+	not in : "key__nin": [1]
+	date : "key__date": "2022-01-01" or time.Time(oracle必须)
+	between : "key__between": [1, 2]
 
-以下不支持子查询
-is null : "key__null": true
-is not null : "key__null": false
-$or : map[string]interface{} or []map[string]interface{}
-$and : map[string]interface{} or []map[string]interface{}
-and_like :
-		"key__istartswith": "123"
-		"key__startswith": "123"
-		"key__iendswith": "123"
-		"key__endswith": "123"
-		"key__icontains": "123" or ["123", "123"]
-		"key__contains": "123" or ["123", "123"]
-or_like :
-		"key__or_istartswith": "123" or ["123", "123"]
-		"key__or_startswith": "123" or ["123", "123"]
-		"key__or_iendswith": "123" or ["123", "123"]
-		"key__or_endswith": "123" or ["123", "123"]
-		"key__or_icontains": "123" or ["123", "123"]
-		"key__or_contains": "123" or ["123", "123"]
+	以下不支持子查询
+	is null : "key__null": true
+	is not null : "key__null": false
+	$or : map[string]interface{} or []map[string]interface{}
+	$and : map[string]interface{} or []map[string]interface{}
+	and_like : 参数为数组，针对数组每个元素分别取 like，之后条件之间取 and
+			"key__startswith": "123"
+			"key__endswith": "123"
+			"key__contains": "123" or ["123", "123"]
+			"key__customlike": "__st" or ["%test", "%test%", "test%"] // 自定义查询语句
+	or_like : 参数为数组，针对数组每个元素分别取 like，之后条件之间取 or
+			"key__orstartswith": "123" or ["123", "123"]
+			"key__orendswith": "123" or ["123", "123"]
+			"key__orcontains": "123" or ["123", "123"]
+	        "key__orcustomlike": "__st" or ["%test", "%test%", "test%"] // 自定义查询语句
 
-原始数据，#修饰的字段为原始字段，不做处理，其他的字段会根据tag计算
-~ 为条件取反，必须在最前面，可用在所有算子前面，如果与#连用，#应在~后面，如：~#test
+	原始数据，#修饰的字段为原始字段，不做处理，其他的字段会根据tag计算
+	~ 为条件取反，必须在最前面，可用在所有算子前面，如果与#连用，#应在~后面，如：~#test
 ```
 #### select语法
 ```
