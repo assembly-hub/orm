@@ -307,6 +307,7 @@ func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
 	var cols []string
 	colSet := set.New[string]()
 	var values []string
+	var rawVal []string
 
 	switch data := data.(type) {
 	case map[string]interface{}:
@@ -321,6 +322,7 @@ func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
 				cols = append(cols, formatKey)
 				colSet.Add(k)
 				values = append(values, fmt.Sprintf("%v as %s", v, formatKey))
+				rawVal = append(rawVal, fmt.Sprintf("%v", v))
 				continue
 			}
 
@@ -340,6 +342,7 @@ func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
 			cols = append(cols, formatKey)
 			colSet.Add(k)
 			values = append(values, fmt.Sprintf("%s as %s", val, formatKey))
+			rawVal = append(rawVal, fmt.Sprintf("%s", val))
 		}
 	default:
 		dataValue := reflect.ValueOf(data)
@@ -373,6 +376,7 @@ func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
 			cols = append(cols, formatKey)
 			colSet.Add(colName)
 			values = append(values, fmt.Sprintf("%s as %s", val, formatKey))
+			rawVal = append(rawVal, fmt.Sprintf("%s", val))
 		}
 	}
 	if len(cols) <= 0 || len(values) <= 0 {
@@ -424,7 +428,7 @@ func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
 			util.JoinArr(update, ","), util.JoinArr(cols, ","), connectStrArr(cols, ",", "\"S\".", ""))
 	} else {
 		upsertSQL = "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values(%s)"
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(cols, ","), util.JoinArr(values, ","))
+		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(cols, ","), util.JoinArr(rawVal, ","))
 	}
 
 	return upsertSQL, nil
@@ -440,6 +444,7 @@ func (orm *ORM) oracleUpsertManySQL(dataList []interface{}, cols []string) (stri
 	typeErrStr := "type of upsert data is []map[string]interface{} or []*struct or []struct"
 
 	var valArr []string
+	var rawVal []string
 	for _, data := range dataList {
 		var valMap map[string]interface{}
 		switch data := data.(type) {
@@ -476,23 +481,31 @@ func (orm *ORM) oracleUpsertManySQL(dataList []interface{}, cols []string) (stri
 		}
 
 		subVal := "SELECT "
+		subStr := "("
 		for _, colName := range cols {
+			formatKey := fmt.Sprintf("%s%s%s", dbCore.EscStart, colName, dbCore.EscEnd)
 			if v, ok := valMap[colName]; ok {
 				val, timeEmpty := orm.formatValue(v)
 				if (colName == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
-					subVal += "null,"
+					subVal += "null as " + formatKey + ","
+					subStr += "null,"
 					continue
 				}
 
-				subVal += val + ","
+				subVal += val + " as " + formatKey + ","
+				subStr += val + ","
 			} else if v, ok = valMap["#"+colName]; ok {
-				subVal += fmt.Sprintf("%v,", v)
+				subVal += fmt.Sprintf("%v as %s,", v, formatKey)
+				subStr += fmt.Sprintf("%v", v)
 			} else {
-				subVal += "null,"
+				subVal += "null as " + formatKey + ","
+				subStr += "null,"
 			}
 		}
 		subVal = subVal[:len(subVal)-1] + " from \"DUAL\""
+		subStr = subStr[:len(subStr)-1] + ")"
 		valArr = append(valArr, subVal)
+		rawVal = append(rawVal, subStr)
 	}
 
 	if len(valArr) <= 0 {
@@ -519,7 +532,7 @@ func (orm *ORM) oracleUpsertManySQL(dataList []interface{}, cols []string) (stri
 		hasUK = orm.checkUK(colSet)
 	}
 
-	updateCols := make([]string, 0, len(cols))
+	updateCols := make([]string, 0, len(newCols))
 
 	upsertSQL := "MERGE INTO " + dbCore.EscStart + "%s" + dbCore.EscEnd + " \"T\" " +
 		"USING (%s) \"S\" ON (%s) WHEN MATCHED THEN " +
@@ -531,17 +544,17 @@ func (orm *ORM) oracleUpsertManySQL(dataList []interface{}, cols []string) (stri
 		unionStr = " UNION ALL "
 	}
 	if hasPK {
-		for i := range cols {
-			if dbCore.EscStart+orm.primaryKey+dbCore.EscEnd == cols[i] {
+		for i := range newCols {
+			if dbCore.EscStart+orm.primaryKey+dbCore.EscEnd == newCols[i] {
 				continue
 			}
-			updateCols = append(updateCols, fmt.Sprintf("\"T\".%s=\"S\".%s", cols[i], cols[i]))
+			updateCols = append(updateCols, fmt.Sprintf("\"T\".%s=\"S\".%s", newCols[i], newCols[i]))
 		}
 		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(valArr, unionStr),
 			fmt.Sprintf("\"T\".%s%s%s=\"S\".%s%s%s",
 				dbCore.EscStart, orm.primaryKey, dbCore.EscEnd,
 				dbCore.EscStart, orm.primaryKey, dbCore.EscEnd),
-			util.JoinArr(updateCols, ","), util.JoinArr(cols, ","), connectStrArr(cols, ",", "\"S\".", ""))
+			util.JoinArr(updateCols, ","), util.JoinArr(newCols, ","), connectStrArr(newCols, ",", "\"S\".", ""))
 	} else if hasUK {
 		var onList []string
 		orm.uniqueKeys.Range(func(item string) bool {
@@ -550,8 +563,8 @@ func (orm *ORM) oracleUpsertManySQL(dataList []interface{}, cols []string) (stri
 				dbCore.EscStart, item, dbCore.EscEnd))
 			return true
 		})
-		for i := range cols {
-			k := cols[i]
+		for i := range newCols {
+			k := newCols[i]
 			if orm.uniqueKeys.Has(k[len(dbCore.EscStart) : len(k)-len(dbCore.EscEnd)]) {
 				continue
 			}
@@ -559,10 +572,10 @@ func (orm *ORM) oracleUpsertManySQL(dataList []interface{}, cols []string) (stri
 		}
 		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(valArr, unionStr),
 			util.JoinArr(onList, " and "),
-			util.JoinArr(updateCols, ","), util.JoinArr(cols, ","), connectStrArr(cols, ",", "\"S\".", ""))
+			util.JoinArr(updateCols, ","), util.JoinArr(newCols, ","), connectStrArr(newCols, ",", "\"S\".", ""))
 	} else {
 		upsertSQL = "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values%s"
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(valArr, ","))
+		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(rawVal, ","))
 	}
 
 	return upsertSQL, nil

@@ -303,7 +303,7 @@ func (orm *ORM) sqlserverUpsertSQL(data interface{}) (string, error) {
 		"USING (values%s) AS [S](%s) ON (%s) WHEN MATCHED THEN " +
 		"UPDATE SET %s " +
 		"WHEN NOT MATCHED THEN " +
-		"INSERT(%s) VALUES(%s)"
+		"INSERT(%s) VALUES(%s);"
 	if hasPK {
 		for i := range realCol {
 			update = append(update, fmt.Sprintf("[T].%s=[S].%s", realCol[i], realCol[i]))
@@ -435,11 +435,11 @@ func (orm *ORM) sqlserverUpsertManySQL(dataList []interface{}, cols []string) (s
 
 	updateCols := make([]string, 0, len(realCol))
 
-	upsertSQL := "MERGE INTO " + dbCore.EscStart + "%s" + dbCore.EscEnd + " as T " +
-		"USING (values%s) AS S(%s) ON (%s) WHEN MATCHED THEN " +
+	upsertSQL := "MERGE INTO " + dbCore.EscStart + "%s" + dbCore.EscEnd + " as [T] " +
+		"USING (values%s) AS [S](%s) ON (%s) WHEN MATCHED THEN " +
 		"UPDATE SET %s " +
 		"WHEN NOT MATCHED THEN " +
-		"INSERT(%s) VALUES(%s)"
+		"INSERT(%s) VALUES(%s);"
 	if hasPK {
 		for i := range realCol {
 			updateCols = append(updateCols, fmt.Sprintf("[T].%s=[S].%s", realCol[i], realCol[i]))

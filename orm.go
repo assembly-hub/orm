@@ -21,6 +21,19 @@ const (
 	defaultBatchSize  = 200
 )
 
+var (
+	notReadyLastInsertIDSet set.Set[int]
+	notReadyRowsAffectedSet set.Set[int]
+)
+
+func init() {
+	notReadyLastInsertIDSet = set.New[int]()
+	notReadyLastInsertIDSet.Add(dbtype.SQLServer, dbtype.Postgres, dbtype.OpenGauss)
+
+	notReadyRowsAffectedSet = set.New[int]()
+	notReadyRowsAffectedSet.Add(dbtype.Postgres, dbtype.OpenGauss)
+}
+
 type databaseQuery struct {
 	Distinct        bool
 	SelectForUpdate bool
@@ -480,11 +493,10 @@ func (orm *ORM) ExecuteSQL(customSQL string) (affectedRow int64, err error) {
 	if err != nil {
 		return 0, err
 	}
-	affectedRow, err = ret.RowsAffected()
-	if err != nil {
-		return 0, err
+	if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+		return -1, nil
 	}
-	return
+	return ret.RowsAffected()
 }
 
 // Exist 检查数据是否存在
@@ -572,14 +584,15 @@ func (orm *ORM) InsertOne(data interface{}) (insertID int64, err error) {
 	if err != nil {
 		return 0, err
 	}
-	id, err := ret.LastInsertId()
-	if err != nil {
-		return 0, err
+
+	if notReadyLastInsertIDSet.Has(orm.ref.dbConf.DBType) {
+		return -1, nil
 	}
-	return id, nil
+
+	return ret.LastInsertId()
 }
 
-func (orm *ORM) InsertMany(data []interface{}, trans bool) (affected int64, insertIds []int64, err error) {
+func (orm *ORM) InsertMany(data []interface{}, trans bool) (affected int64, insertIDs []int64, err error) {
 	if len(data) <= 0 {
 		return 0, nil, fmt.Errorf("no data")
 	}
@@ -614,17 +627,21 @@ func (orm *ORM) InsertMany(data []interface{}, trans bool) (affected int64, inse
 				panic(err)
 			}
 
-			insertID, err := execContext.LastInsertId()
-			if err != nil {
-				panic(err)
+			if !notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				rowsAffected, err := execContext.RowsAffected()
+				if err != nil {
+					panic(err)
+				}
+				affected += rowsAffected
 			}
-			insertIds = append(insertIds, insertID)
 
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
+			if !notReadyLastInsertIDSet.Has(orm.ref.dbConf.DBType) {
+				insertID, err := execContext.LastInsertId()
+				if err != nil {
+					panic(err)
+				}
+				insertIDs = append(insertIDs, insertID)
 			}
-			affected += rowsAffected
 		}
 
 		err = tx.Commit()
@@ -649,17 +666,21 @@ func (orm *ORM) InsertMany(data []interface{}, trans bool) (affected int64, inse
 				panic(err)
 			}
 
-			insertID, err := execContext.LastInsertId()
-			if err != nil {
-				panic(err)
+			if !notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				rowsAffected, err := execContext.RowsAffected()
+				if err != nil {
+					panic(err)
+				}
+				affected += rowsAffected
 			}
-			insertIds = append(insertIds, insertID)
 
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
+			if !notReadyLastInsertIDSet.Has(orm.ref.dbConf.DBType) {
+				insertID, err := execContext.LastInsertId()
+				if err != nil {
+					panic(err)
+				}
+				insertIDs = append(insertIDs, insertID)
 			}
-			affected += rowsAffected
 		}
 	}
 	return
@@ -714,6 +735,9 @@ func (orm *ORM) InsertManySameClos(data []interface{}, cols []string, batchSize 
 				panic(err)
 			}
 
+			if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				continue
+			}
 			rowsAffected, err := execContext.RowsAffected()
 			if err != nil {
 				panic(err)
@@ -742,6 +766,9 @@ func (orm *ORM) InsertManySameClos(data []interface{}, cols []string, batchSize 
 				panic(err)
 			}
 
+			if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				continue
+			}
 			rowsAffected, err := execContext.RowsAffected()
 			if err != nil {
 				panic(err)
@@ -769,11 +796,12 @@ func (orm *ORM) UpsertOne(data interface{}) (insertID int64, err error) {
 	if err != nil {
 		return 0, err
 	}
-	insertID, err = ret.LastInsertId()
-	if err != nil {
-		return 0, err
+
+	if notReadyLastInsertIDSet.Has(orm.ref.dbConf.DBType) {
+		return -1, nil
 	}
-	return insertID, nil
+
+	return ret.LastInsertId()
 }
 
 func (orm *ORM) UpsertMany(data []interface{}, trans bool) (affected int64, insertIDs []int64, err error) {
@@ -811,17 +839,21 @@ func (orm *ORM) UpsertMany(data []interface{}, trans bool) (affected int64, inse
 				panic(err)
 			}
 
-			insertID, err := execContext.LastInsertId()
-			if err != nil {
-				panic(err)
+			if !notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				rowsAffected, err := execContext.RowsAffected()
+				if err != nil {
+					panic(err)
+				}
+				affected += rowsAffected
 			}
-			insertIDs = append(insertIDs, insertID)
 
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
+			if !notReadyLastInsertIDSet.Has(orm.ref.dbConf.DBType) {
+				insertID, err := execContext.LastInsertId()
+				if err != nil {
+					panic(err)
+				}
+				insertIDs = append(insertIDs, insertID)
 			}
-			affected += rowsAffected
 		}
 
 		err = tx.Commit()
@@ -845,17 +877,21 @@ func (orm *ORM) UpsertMany(data []interface{}, trans bool) (affected int64, inse
 				panic(err)
 			}
 
-			insertID, err := execContext.LastInsertId()
-			if err != nil {
-				panic(err)
+			if !notReadyLastInsertIDSet.Has(orm.ref.dbConf.DBType) {
+				insertID, err := execContext.LastInsertId()
+				if err != nil {
+					panic(err)
+				}
+				insertIDs = append(insertIDs, insertID)
 			}
-			insertIDs = append(insertIDs, insertID)
 
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
+			if !notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				rowsAffected, err := execContext.RowsAffected()
+				if err != nil {
+					panic(err)
+				}
+				affected += rowsAffected
 			}
-			affected += rowsAffected
 		}
 	}
 	return
@@ -910,6 +946,9 @@ func (orm *ORM) UpsertManySameClos(data []interface{}, cols []string, batchSize 
 				panic(err)
 			}
 
+			if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				continue
+			}
 			rowsAffected, err := execContext.RowsAffected()
 			if err != nil {
 				panic(err)
@@ -936,6 +975,10 @@ func (orm *ORM) UpsertManySameClos(data []interface{}, cols []string, batchSize 
 			}
 			if err != nil {
 				panic(err)
+			}
+
+			if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				continue
 			}
 
 			rowsAffected, err := execContext.RowsAffected()
@@ -987,6 +1030,10 @@ func (orm *ORM) SaveMany(data []interface{}, trans bool) (affected int64, err er
 				panic(err)
 			}
 
+			if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				continue
+			}
+
 			rowsAffected, err := execContext.RowsAffected()
 			if err != nil {
 				panic(err)
@@ -1013,6 +1060,10 @@ func (orm *ORM) SaveMany(data []interface{}, trans bool) (affected int64, err er
 			}
 			if err != nil {
 				panic(err)
+			}
+
+			if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				continue
 			}
 
 			rowsAffected, err := execContext.RowsAffected()
@@ -1079,11 +1130,10 @@ func (orm *ORM) UpdateByWhere(update map[string]interface{}, where Where) (affec
 	if err != nil {
 		return 0, err
 	}
-	rowsAffected, err := ret.RowsAffected()
-	if err != nil {
-		return 0, err
+	if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+		return -1, nil
 	}
-	return rowsAffected, nil
+	return ret.RowsAffected()
 }
 
 // UpdateMany 主键，id 不能为空，为空将更新失败
@@ -1121,6 +1171,9 @@ func (orm *ORM) UpdateMany(data []interface{}, trans bool) (affected int64, err 
 			if err != nil {
 				panic(err)
 			}
+			if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				continue
+			}
 			rowsAffected, err := execContext.RowsAffected()
 			if err != nil {
 				panic(err)
@@ -1147,6 +1200,9 @@ func (orm *ORM) UpdateMany(data []interface{}, trans bool) (affected int64, err 
 			}
 			if err != nil {
 				panic(err)
+			}
+			if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				continue
 			}
 			rowsAffected, err := execContext.RowsAffected()
 			if err != nil {
@@ -1177,6 +1233,9 @@ func (orm *ORM) UpdateOne(data interface{}) (affected int64, err error) {
 	if err != nil {
 		return 0, err
 	}
+	if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+		return -1, nil
+	}
 	return execContext.RowsAffected()
 }
 
@@ -1197,6 +1256,9 @@ func (orm *ORM) ReplaceOne(data interface{}) (affected int64, err error) {
 
 	if err != nil {
 		return 0, err
+	}
+	if notReadyLastInsertIDSet.Has(orm.ref.dbConf.DBType) {
+		return -1, nil
 	}
 	return execContext.LastInsertId()
 }
@@ -1236,17 +1298,21 @@ func (orm *ORM) ReplaceMany(data []interface{}, trans bool) (affected int64, ins
 				panic(err)
 			}
 
-			insertID, err := execContext.LastInsertId()
-			if err != nil {
-				panic(err)
+			if !notReadyLastInsertIDSet.Has(orm.ref.dbConf.DBType) {
+				insertID, err := execContext.LastInsertId()
+				if err != nil {
+					panic(err)
+				}
+				insertIds = append(insertIds, insertID)
 			}
-			insertIds = append(insertIds, insertID)
 
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
+			if !notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				rowsAffected, err := execContext.RowsAffected()
+				if err != nil {
+					panic(err)
+				}
+				affected += rowsAffected
 			}
-			affected += rowsAffected
 		}
 
 		err = tx.Commit()
@@ -1270,17 +1336,21 @@ func (orm *ORM) ReplaceMany(data []interface{}, trans bool) (affected int64, ins
 				panic(err)
 			}
 
-			insertID, err := execContext.LastInsertId()
-			if err != nil {
-				panic(err)
+			if !notReadyLastInsertIDSet.Has(orm.ref.dbConf.DBType) {
+				insertID, err := execContext.LastInsertId()
+				if err != nil {
+					panic(err)
+				}
+				insertIds = append(insertIds, insertID)
 			}
-			insertIds = append(insertIds, insertID)
 
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
+			if !notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				rowsAffected, err := execContext.RowsAffected()
+				if err != nil {
+					panic(err)
+				}
+				affected += rowsAffected
 			}
-			affected += rowsAffected
 		}
 	}
 	return
@@ -1335,6 +1405,9 @@ func (orm *ORM) ReplaceManySameClos(data []interface{}, cols []string, batchSize
 				panic(err)
 			}
 
+			if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				continue
+			}
 			rowsAffected, err := execContext.RowsAffected()
 			if err != nil {
 				panic(err)
@@ -1363,6 +1436,9 @@ func (orm *ORM) ReplaceManySameClos(data []interface{}, cols []string, batchSize
 				panic(err)
 			}
 
+			if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+				continue
+			}
 			rowsAffected, err := execContext.RowsAffected()
 			if err != nil {
 				panic(err)
@@ -1403,11 +1479,11 @@ func (orm *ORM) DeleteByWhere(where map[string]interface{}) (affected int64, err
 	if err != nil {
 		return 0, err
 	}
-	rowsAffected, err := ret.RowsAffected()
-	if err != nil {
-		return 0, err
+	if notReadyRowsAffectedSet.Has(orm.ref.dbConf.DBType) {
+		return -1, nil
 	}
-	return rowsAffected, nil
+
+	return ret.RowsAffected()
 }
 
 func (orm *ORM) formatInsertSQL(data interface{}) (string, error) {
@@ -1456,9 +1532,11 @@ func (orm *ORM) formatUpsertSQL(data interface{}) (string, error) {
 	switch orm.ref.dbConf.DBType {
 	case dbtype.MySQL, dbtype.MariaDB:
 		return orm.mysqlUpsertSQL(data)
+	case dbtype.OpenGauss:
+		return orm.gaussUpsertSQL(data)
 	case dbtype.SQLite2, dbtype.SQLite3:
 		return orm.sqliteUpsertSQL(data)
-	case dbtype.Postgres, dbtype.OpenGauss:
+	case dbtype.Postgres:
 		return orm.postgresUpsertSQL(data)
 	case dbtype.SQLServer:
 		return orm.sqlserverUpsertSQL(data)
@@ -1473,9 +1551,11 @@ func (orm *ORM) formatUpsertManySQL(dataList []interface{}, cols []string) (stri
 	switch orm.ref.dbConf.DBType {
 	case dbtype.MySQL, dbtype.MariaDB:
 		return orm.mysqlUpsertManySQL(dataList, cols)
+	case dbtype.OpenGauss:
+		return orm.gaussUpsertManySQL(dataList, cols)
 	case dbtype.SQLite2, dbtype.SQLite3:
 		return orm.sqliteUpsertManySQL(dataList, cols)
-	case dbtype.Postgres, dbtype.OpenGauss:
+	case dbtype.Postgres:
 		return orm.postgresUpsertManySQL(dataList, cols)
 	case dbtype.SQLServer:
 		return orm.sqlserverUpsertManySQL(dataList, cols)

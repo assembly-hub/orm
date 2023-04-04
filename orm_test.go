@@ -1,6 +1,11 @@
 package orm
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
+	"testing"
+
 	"github.com/assembly-hub/orm/dbtype"
 )
 
@@ -32,6 +37,8 @@ var ref *Reference
 func init() {
 	// 使用之前需要完成表定义
 	// 定义表关联
+	// mysql mariadb sqlserver postgres opengauss sqllite oracle
+	// mysql
 	ref = NewReference(dbtype.MySQL)
 	// 添加表定义
 	ref.AddTableDef("table1", Table1{})
@@ -39,4 +46,33 @@ func init() {
 	ref.AddTableDef("table3", Table3{})
 	// 编译表关系
 	ref.BuildRefs()
+}
+
+func TestORM(t *testing.T) {
+	var db *sql.DB = &sql.DB{}
+	orm := NewORM(context.Background(), "table1", db, ref)
+	_, err := orm.ReplaceManySameClos([]interface{}{map[string]interface{}{
+		"id":   1,
+		"name": "test ORM",
+	}, map[string]interface{}{
+		"id":   2,
+		"name": "test ORM2",
+	}}, []string{"id", "name"}, 10, true)
+
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+}
+
+func TestORM2(t *testing.T) {
+	var db *sql.DB = &sql.DB{}
+	orm := NewORM(context.Background(), "table1", db, ref)
+
+	_, err := orm.ReplaceOne(map[string]interface{}{
+		"id":   1,
+		"name": "test ORM",
+	})
+	if err != nil {
+		fmt.Println(err.Error())
+	}
 }
