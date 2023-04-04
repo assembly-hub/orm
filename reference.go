@@ -32,6 +32,8 @@ type tableRefData struct {
 }
 
 type Reference struct {
+	dbType        int
+	dbConf        *dbCoreData
 	joinConf      map[string]map[string]*referenceData
 	tableDef      map[string][]string
 	structToTable map[string]string
@@ -48,13 +50,26 @@ type formatColumnData struct {
 	TagList    []string
 }
 
-func NewReference() *Reference {
+func NewReference(dbType int) *Reference {
 	obj := new(Reference)
+	obj.dbType = dbType
+	obj.dbConf = dbConfMap[obj.dbType]
+	if obj.dbConf == nil {
+		panic(fmt.Errorf("database type[%d] not implemented, please confirm", dbType))
+	}
 	obj.joinConf = map[string]map[string]*referenceData{}
 	obj.tableDef = map[string][]string{}
 	obj.structToTable = map[string]string{}
 	obj.tableRef = map[string][]*tableRefData{}
 	return obj
+}
+
+func (c *Reference) GetDBType() int {
+	return c.dbType
+}
+
+func (c *Reference) getDBConf() *dbCoreData {
+	return c.dbConf
 }
 
 func (c *Reference) getTableName(structName string) string {
@@ -112,7 +127,20 @@ func (c *Reference) AddTableDef(table string, def interface{}) {
 
 			toStructName := fmt.Sprintf("%s.%s", refType.PkgPath(), refType.Name())
 			arr := strings.Split(ref, ";")
-			if len(arr) == 2 {
+
+			if len(arr) < 1 {
+				panic(fmt.Sprintf("table[%s] ref data error, must be \"joinType[;id=rid,name=rname,...]\"", table))
+			}
+
+			join := toJoinData(arr[0])
+			tbRef := &tableRefData{
+				Tag:          colName,
+				Join:         join,
+				On:           nil,
+				ToStructName: toStructName,
+			}
+
+			if len(arr) == 2 && arr[1] != "" {
 				var joinOn [][2]string
 				onWhere := strings.Split(arr[1], ",")
 				for _, on := range onWhere {
@@ -130,19 +158,10 @@ func (c *Reference) AddTableDef(table string, def interface{}) {
 					}
 					joinOn = append(joinOn, [2]string{arr[0], arr[1]})
 				}
-				join := toJoinData(arr[0])
-				if len(joinOn) <= 0 && !join.isNatural() {
-					panic("join miss on condition")
-				}
-				c.tableRef[table] = append(c.tableRef[table], &tableRefData{
-					Tag:          colName,
-					Join:         join,
-					On:           joinOn,
-					ToStructName: toStructName,
-				})
-			} else {
-				panic(fmt.Sprintf("table[%s] ref data error, must be \"joinType;id=rid,name=rname,...\"", table))
+				tbRef.On = joinOn
 			}
+
+			c.tableRef[table] = append(c.tableRef[table], tbRef)
 		} else {
 			err = globalVerifyObj.VerifyFieldName(colName)
 			if err != nil {

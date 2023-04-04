@@ -3,7 +3,8 @@ package orm
 import (
 	"fmt"
 	"testing"
-	"time"
+
+	"github.com/assembly-hub/orm/dbtype"
 )
 
 func TestBaseGetData(t *testing.T) {
@@ -191,118 +192,8 @@ func TestBaseGetData2(t *testing.T) {
 	fmt.Println(s)
 }
 
-func TestMySqlOrmQuery(t *testing.T) {
-	t1 := "table1"
-	t2 := "table2"
-	query := &queryModel{
-		MainTable: t1,
-		Select: []*selectModel{{
-			Table: t1,
-			Cols:  []string{"is_finished", "cur_status"},
-		}, {
-			Table: t2,
-			Cols:  []string{"end_time"},
-		}},
-		JoinList: []*joinModel{{
-			Type:      naturalLeftJoinType,
-			MainTable: t1,
-			JoinTable: t2,
-			On: [][2]string{{
-				"task_info_id", "id",
-			}},
-		}},
-		Limit: []uint{1},
-		Where: map[string]interface{}{
-			t1 + ".is_valid": 1,
-			t1 + ".id":       "123",
-		},
-	}
-
-	fmt.Println(query.SQL())
-}
-
-func TestMySqlOrmConf(t *testing.T) {
-	ref := NewReference()
-	ref.addReference(&referenceData{
-		FromTable: "table1",
-		Type:      leftJoinType,
-		Tag:       "tag1",
-		ToTable:   "table2",
-		On: [][2]string{
-			{"id", "name"},
-		},
-	}, &referenceData{
-		FromTable: "table1",
-		Type:      leftJoinType,
-		Tag:       "tag2",
-		ToTable:   "table3",
-		On: [][2]string{
-			{"sid", "sname"},
-		},
-	}, &referenceData{
-		FromTable: "table2",
-		Type:      leftJoinType,
-		Tag:       "tag3",
-		ToTable:   "table5",
-		On: [][2]string{
-			{"id", "name"},
-		},
-	})
-
-	q := &BaseQuery{
-		RefConf:   ref,
-		TableName: "table1",
-		Select: []string{
-			"id", "tag1.col", "tag1.tag3.sum(col2) as s",
-		},
-		Order: []string{
-			"tag1.tag3.col",
-			"-tag1.col",
-			"#qwe",
-		},
-		GroupBy: []string{
-			"#col3",
-		},
-		Distinct: false,
-		Where: map[string]interface{}{
-			"is_valid":          1,
-			"id__gt":            "123",
-			"tag1.tag3.col__in": []string{"1", "2", "3"},
-			"tm":                time.Now(),
-			"$or": []map[string]interface{}{
-				{
-					"c": 1,
-					"$or": []map[string]interface{}{
-						{
-							"a": 1,
-						},
-						{
-							"a": 2,
-						},
-					},
-				}, {
-					"c": 2,
-					"$and": []map[string]interface{}{
-						{
-							"a": 2,
-						},
-						{
-							"a": 6,
-						},
-					},
-				},
-			},
-		},
-	}
-
-	s := q.SQL()
-	fmt.Println(s)
-
-	fmt.Println(q.GetWhere())
-}
-
 func TestMySqlOrmConf2(t *testing.T) {
-	ref := NewReference()
+	ref := NewReference(dbtype.MySQL)
 	ref.AddTableDef("table1", Table1{})
 	ref.AddTableDef("table2", Table2{})
 	ref.AddTableDef("table3", Table3{})
@@ -318,7 +209,7 @@ func TestMySqlOrmConf2(t *testing.T) {
 			"count(*) as c",
 		},
 		Where: map[string]interface{}{
-			"tb2.tb3.name": "test",
+			"tb2.tb3.name__istartswith": "test",
 		},
 		Distinct: false,
 	}
@@ -343,7 +234,7 @@ type Def struct {
 }
 
 func TestMySQLOrmConf3(t *testing.T) {
-	ref := NewReference()
+	ref := NewReference(dbtype.MySQL)
 	ref.AddTableDef("table1", Def{})
 	ref.AddTableDef("table2", Def2{})
 	ref.BuildRefs()
@@ -363,7 +254,7 @@ func TestMySQLOrmConf3(t *testing.T) {
 }
 
 func TestMySqlOrmConf31(t *testing.T) {
-	ref := NewReference()
+	ref := NewReference(dbtype.MySQL)
 	ref.AddTableDef("table1", Def{})
 	ref.AddTableDef("table2", Def2{})
 	ref.BuildRefs()

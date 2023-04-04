@@ -13,7 +13,8 @@ const (
 	defaultAliasPrefix = "orm_"
 )
 
-// where 条件 支持子查询 MySqlQuery or *MySqlQuery
+// where 条件 支持子查询 BaseQuery or *BaseQuery
+// bin含义：区分文本大小
 // = : "key": "val" or "key__eq": "val" or "key__bin_eq": "val"
 // < : "key__lt": 1 or "key__bin_lt": 1
 // <= : "key__lte": 1 or "key__bin_lte": 1
@@ -31,28 +32,25 @@ const (
 // $or : map[string]interface{} or []map[string]interface{}
 // $and : map[string]interface{} or []map[string]interface{}
 // and_like :
-//		"key__istartswith": "123"
 //		"key__startswith": "123"
-//		"key__iendswith": "123"
 //		"key__endswith": "123"
-//		"key__icontains": "123" or ["123", "123"]
 //		"key__contains": "123" or ["123", "123"]
 // or_like :
-//		"key__or_istartswith": "123" or ["123", "123"]
 //		"key__or_startswith": "123" or ["123", "123"]
-//		"key__or_iendswith": "123" or ["123", "123"]
 //		"key__or_endswith": "123" or ["123", "123"]
-//		"key__or_icontains": "123" or ["123", "123"]
 //		"key__or_contains": "123" or ["123", "123"]
 
 // BaseQuery
 // # 为内置符号，标志为原始字段，不进行任何处理，仅在以下数据有效：
 // Select Order GroupBy Where Having
 type BaseQuery struct {
-	RefConf   *Reference
-	joinSet   set.Set[string]
-	tagSet    set.Set[string]
-	joinLevel [][]*referenceData
+	// 用户自定义sql
+	CustomSQL  string
+	PrivateKey string
+	RefConf    *Reference
+	joinSet    set.Set[string]
+	tagSet     set.Set[string]
+	joinLevel  [][]*referenceData
 	// 字段别名链接字符串，SelectRaw 为false有效
 	SelectColLinkStr string
 	// true：使用原始字段名；false：使用别名
@@ -100,6 +98,8 @@ func (q *BaseQuery) addRef(level int, ref *referenceData) {
 func (q *BaseQuery) formatColumn(sel string) *formatColumnData {
 	colData := &formatColumnData{}
 
+	dbCore := q.RefConf.getDBConf()
+
 	tagTable := q.TableName
 	col := sel
 
@@ -125,9 +125,11 @@ func (q *BaseQuery) formatColumn(sel string) *formatColumnData {
 
 			newRef.tagList = colArr[:level+1]
 			if level >= 0 {
-				newRef.toAlias = fmt.Sprintf("`%s%s`", defaultAliasPrefix, util.JoinArr(colArr[:level+1], "_"))
+				newRef.toAlias = fmt.Sprintf("%s%s%s%s", dbCore.EscStart, defaultAliasPrefix,
+					util.JoinArr(colArr[:level+1], "_"), dbCore.EscEnd)
 				if level >= 1 {
-					newRef.fromAlias = fmt.Sprintf("`%s%s`", defaultAliasPrefix, util.JoinArr(colArr[:level], "_"))
+					newRef.fromAlias = fmt.Sprintf("%s%s%s%s", dbCore.EscStart, defaultAliasPrefix,
+						util.JoinArr(colArr[:level], "_"), dbCore.EscEnd)
 				}
 			}
 
@@ -174,9 +176,13 @@ func (q *BaseQuery) formatColumn(sel string) *formatColumnData {
 		colData.FuncName = action
 		colData.Alias = col[j+1:]
 
-		colData.FormatCol = fmt.Sprintf("%s(`%s`.`%s`)%s", action, tagTable, colData.TableCol, colData.Alias)
+		colData.FormatCol = fmt.Sprintf("%s(%s%s%s.%s%s%s)%s", action,
+			dbCore.EscStart, tagTable, dbCore.EscEnd,
+			dbCore.EscStart, colData.TableCol, dbCore.EscEnd, colData.Alias)
 		if colData.TableCol == "*" {
-			colData.FormatCol = fmt.Sprintf("%s(`%s`.%s)%s", action, tagTable, colData.TableCol, colData.Alias)
+			colData.FormatCol = fmt.Sprintf("%s(%s%s%s.%s)%s", action,
+				dbCore.EscStart, tagTable, dbCore.EscEnd,
+				colData.TableCol, colData.Alias)
 		} else {
 			err := globalVerifyObj.VerifyFieldName(colData.TableCol)
 			if err != nil {
@@ -190,7 +196,9 @@ func (q *BaseQuery) formatColumn(sel string) *formatColumnData {
 	colData.Alias = ""
 	i = strings.Index(col, " ")
 	colData.TableCol = col
-	colData.FormatCol = fmt.Sprintf("`%s`.`%s`", tagTable, col)
+	colData.FormatCol = fmt.Sprintf("%s%s%s.%s%s%s",
+		dbCore.EscStart, tagTable, dbCore.EscEnd,
+		dbCore.EscStart, col, dbCore.EscEnd)
 	if i > 0 {
 		colData.TableCol = col[:i]
 		err := globalVerifyObj.VerifyFieldName(colData.TableCol)
@@ -199,10 +207,15 @@ func (q *BaseQuery) formatColumn(sel string) *formatColumnData {
 		}
 
 		colData.Alias = col[i+1:]
-		colData.FormatCol = fmt.Sprintf("`%s`.`%s` %s", tagTable, colData.TableCol, colData.Alias)
+		colData.FormatCol = fmt.Sprintf("%s%s%s.%s%s%s %s",
+			dbCore.EscStart, tagTable, dbCore.EscEnd,
+			dbCore.EscStart, colData.TableCol, dbCore.EscEnd,
+			colData.Alias)
 	} else if col == "*" {
 		colData.TableCol = col
-		colData.FormatCol = fmt.Sprintf("`%s`.%s", tagTable, colData.TableCol)
+		colData.FormatCol = fmt.Sprintf("%s%s%s.%s",
+			dbCore.EscStart, tagTable, dbCore.EscEnd,
+			colData.TableCol)
 	}
 
 	return colData
@@ -258,7 +271,7 @@ func (q *BaseQuery) selectUnzip() {
 		}
 	}
 	var realCols []string
-	realCol := set.Set[string]{}
+	realCol := set.New[string]()
 	for _, col := range cols {
 		if needRemoveCol.Has(col) {
 			continue
@@ -270,12 +283,13 @@ func (q *BaseQuery) selectUnzip() {
 		}
 	}
 	if len(realCols) <= 0 {
-		panic("fields cannot all be removed")
+		panic("the fields cannot be all deleted or are originally empty")
 	}
 	q.Select = realCols
 }
 
 func (q *BaseQuery) aliasSelectData() []*selectModel {
+	dbCore := q.RefConf.getDBConf()
 	q.selectUnzip()
 	if len(q.Select) <= 0 {
 		return nil
@@ -303,14 +317,16 @@ func (q *BaseQuery) aliasSelectData() []*selectModel {
 					if colData.TableCol == "*" {
 						txt = colData.TableAlias
 					}
-					selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s as `%s%s%s`", colData.FormatCol, txt, linkStr, colData.FuncName))
+					selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s as %s%s%s%s%s", colData.FormatCol,
+						dbCore.EscStart, txt, linkStr, colData.FuncName, dbCore.EscEnd))
 				} else {
 					if colData.TableCol == "*" {
 						txt = linkStr
 					} else {
 						txt = linkStr + txt + linkStr
 					}
-					selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s as `%s%s%s`", colData.FormatCol, tagLabel, txt, colData.FuncName))
+					selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s as %s%s%s%s%s", colData.FormatCol,
+						dbCore.EscStart, tagLabel, txt, colData.FuncName, dbCore.EscEnd))
 				}
 			} else if colData.TableCol == "*" {
 				if q.RefConf == nil {
@@ -320,11 +336,16 @@ func (q *BaseQuery) aliasSelectData() []*selectModel {
 					if len(cols) > 0 {
 						if len(colData.TagList) <= 0 {
 							for _, col := range cols {
-								selObj.Cols = append(selObj.Cols, fmt.Sprintf("`%s`.`%s`", colData.TableAlias, col))
+								selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s%s%s.%s%s%s",
+									dbCore.EscStart, colData.TableAlias, dbCore.EscEnd,
+									dbCore.EscStart, col, dbCore.EscEnd))
 							}
 						} else {
 							for _, col := range cols {
-								selObj.Cols = append(selObj.Cols, fmt.Sprintf("`%s`.`%s` as `%s%s%s`", colData.TableAlias, col, tagLabel, linkStr, col))
+								selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s%s%s.%s%s%s as %s%s%s%s%s",
+									dbCore.EscStart, colData.TableAlias, dbCore.EscEnd,
+									dbCore.EscStart, col, dbCore.EscEnd,
+									dbCore.EscStart, tagLabel, linkStr, col, dbCore.EscEnd))
 							}
 						}
 					} else {
@@ -335,7 +356,8 @@ func (q *BaseQuery) aliasSelectData() []*selectModel {
 				if len(colData.TagList) <= 0 {
 					selObj.Cols = append(selObj.Cols, colData.FormatCol)
 				} else {
-					selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s as `%s%s%s`", colData.FormatCol, tagLabel, linkStr, colData.TableCol))
+					selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s as %s%s%s%s%s", colData.FormatCol,
+						dbCore.EscStart, tagLabel, linkStr, colData.TableCol, dbCore.EscEnd))
 				}
 			}
 		}
@@ -486,22 +508,24 @@ func (q *BaseQuery) formatJoin() []*joinModel {
 		return nil
 	}
 
+	dbCore := q.RefConf.getDBConf()
+
 	joinArr := make([]*joinModel, 0, len(q.joinSet))
 	for _, levelData := range q.joinLevel {
 		for _, ref := range levelData {
 			on := make([][2]string, 0, len(ref.On))
 			for _, v := range ref.On {
 				on = append(on, [2]string{
-					fmt.Sprintf("`%s`", v[0]),
-					fmt.Sprintf("`%s`", v[1]),
+					fmt.Sprintf("%s%s%s", dbCore.EscStart, v[0], dbCore.EscEnd),
+					fmt.Sprintf("%s%s%s", dbCore.EscStart, v[1], dbCore.EscEnd),
 				})
 			}
 
 			temp := &joinModel{
 				Type:      ref.Type,
-				MainTable: fmt.Sprintf("`%s`", ref.FromTable),
+				MainTable: fmt.Sprintf("%s%s%s", dbCore.EscStart, ref.FromTable, dbCore.EscEnd),
 				MainAlias: ref.fromAlias,
-				JoinTable: fmt.Sprintf("`%s`", ref.ToTable),
+				JoinTable: fmt.Sprintf("%s%s%s", dbCore.EscStart, ref.ToTable, dbCore.EscEnd),
 				JoinAlias: ref.toAlias,
 				On:        on,
 			}
@@ -523,9 +547,13 @@ func (q *BaseQuery) cond() *queryModel {
 
 	q.initJoinData()
 
-	mainTableName := fmt.Sprintf("`%s`", q.TableName)
+	dbCore := q.RefConf.getDBConf()
+
+	mainTableName := fmt.Sprintf("%s%s%s", dbCore.EscStart, q.TableName, dbCore.EscEnd)
 
 	query := &queryModel{
+		PrivateKey:      q.PrivateKey,
+		DBCore:          dbCore,
 		MainTable:       mainTableName,
 		MainAlias:       "",
 		Distinct:        q.Distinct,
@@ -560,5 +588,8 @@ func (q *BaseQuery) GetWhere() string {
 }
 
 func (q *BaseQuery) SQL() string {
+	if q.CustomSQL != "" {
+		return q.CustomSQL
+	}
 	return q.cond().SQL()
 }

@@ -1,4 +1,4 @@
-// package orm
+// Package orm
 package orm
 
 import (
@@ -7,8 +7,12 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
+	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
+
+	"github.com/assembly-hub/orm/dbtype"
 )
 
 const (
@@ -17,7 +21,7 @@ const (
 	defaultBatchSize  = 200
 )
 
-type mysqlQuery struct {
+type databaseQuery struct {
 	Distinct        bool
 	SelectForUpdate bool
 	Select          []string
@@ -28,8 +32,8 @@ type mysqlQuery struct {
 	Having          map[string]interface{}
 }
 
-func newMySQLQuery() *mysqlQuery {
-	q := new(mysqlQuery)
+func newDBQuery() *databaseQuery {
+	q := new(databaseQuery)
 	q.Distinct = false
 	q.SelectForUpdate = false
 	q.Select = []string{}
@@ -41,57 +45,39 @@ func newMySQLQuery() *mysqlQuery {
 	return q
 }
 
-// where 条件 支持子查询 MySqlQuery or *MySqlQuery
-// = : "key": "val" or "key__eq": "val" or "key__bin_eq": "val"
-// < : "key__lt": 1 or "key__bin_lt": 1
-// <= : "key__lte": 1 or "key__bin_lte": 1
-// > : "key__gt": 1 or "key__bin_gt": 1
-// >= : "key__gte": 1 or "key__bin_gte": 1
-// != : "key__ne": 1 or "key__bin_ne": 1
-// in : "key__in": [1] or "key__bin_in": [1]
-// not in : "key__nin": [1] or "key__bin_nin": [1]
-// date : "key__date": "2022-01-01"
-// between : "key__between": [1, 2]
-
-// 以下不支持子查询
-// is null : "key__null": true
-// is not null : "key__null": false
-// $or : map[string]interface{} or []map[string]interface{}
-// $and : map[string]interface{} or []map[string]interface{}
-// and_like :
-//		"key__istartswith": "123"
-//		"key__startswith": "123"
-//		"key__iendswith": "123"
-//		"key__endswith": "123"
-//		"key__icontains": "123" or ["123", "123"]
-//		"key__contains": "123" or ["123", "123"]
-// or_like :
-//		"key__or_istartswith": "123" or ["123", "123"]
-//		"key__or_startswith": "123" or ["123", "123"]
-//		"key__or_iendswith": "123" or ["123", "123"]
-//		"key__or_endswith": "123" or ["123", "123"]
-//		"key__or_icontains": "123" or ["123", "123"]
-//		"key__or_contains": "123" or ["123", "123"]
-
 // ORM
 // # 为内置符号，标志为原始字段，不进行任何处理，仅在以下数据有效：
 // Select Order GroupBy Where Having
 type ORM struct {
+	// 用户自定义SQL，优先级最高
+	customSQL string
 	tableName string
 	db        *DB
 	tx        *Tx
 	ref       *Reference
 
-	ctx        context.Context
+	ctx context.Context
+
+	// 主键
 	primaryKey string
+
+	// 唯一键列表
+	uniqueKeys set.Set[string]
+
+	// sql server 排除主键
+	sqlserverExcludePK bool
+
+	// oracle merge union 类型，默认是 union all
+	oracleMergeUnionAll bool
 
 	// 字段别名链接字符串
 	selectColLinkStr string
+
 	// 保留上次查询参数
 	keepQuery bool
 
 	// 查询配置数据
-	Q *mysqlQuery
+	Q *databaseQuery
 }
 
 type Paging struct {
@@ -106,15 +92,20 @@ func NewORM(ctx context.Context, tableName string, db *DB, ref *Reference) *ORM 
 	if err != nil {
 		panic(err)
 	}
-	dao := new(ORM)
+
+	if ref == nil {
+		panic("database reference is nil")
+	}
+
+	if db == nil {
+		panic("db is nil")
+	}
+
+	dao := initORM()
 	dao.tableName = tableName
-	dao.keepQuery = true
 	dao.db = db
 	dao.ref = ref
-	dao.selectColLinkStr = "_"
-	dao.Q = newMySQLQuery()
 	dao.ctx = ctx
-	dao.primaryKey = defaultPrimaryKey
 	return dao
 }
 
@@ -124,21 +115,65 @@ func NewORMWithTx(ctx context.Context, tableName string, tx *Tx, ref *Reference)
 		panic(err)
 	}
 
-	dao := new(ORM)
+	if ref == nil {
+		panic("database reference is nil")
+	}
+
+	if tx == nil {
+		panic("tx is nil")
+	}
+
+	dao := initORM()
 	dao.tableName = tableName
-	dao.db = nil
-	dao.keepQuery = true
 	dao.tx = tx
 	dao.ref = ref
-	dao.selectColLinkStr = "_"
-	dao.Q = newMySQLQuery()
 	dao.ctx = ctx
+	return dao
+}
+
+func initORM() *ORM {
+	dao := new(ORM)
+	dao.uniqueKeys = set.New[string]()
+	dao.sqlserverExcludePK = true
+	dao.oracleMergeUnionAll = true
+	dao.keepQuery = true
+	dao.selectColLinkStr = "_"
+	dao.Q = newDBQuery()
 	dao.primaryKey = defaultPrimaryKey
 	return dao
 }
 
+// SQLServerExcludePK sql server 排除主键
+func (orm *ORM) SQLServerExcludePK(exclude bool) *ORM {
+	orm.sqlserverExcludePK = exclude
+	return orm
+}
+
+// OracleMergeUnionAll oracle merge union 类型，默认是 true
+func (orm *ORM) OracleMergeUnionAll(all bool) *ORM {
+	orm.oracleMergeUnionAll = all
+	return orm
+}
+
+// UniqueKeys 设置新的唯一键，用于 upsert
+func (orm *ORM) UniqueKeys(uniqueKey ...string) *ORM {
+	if len(uniqueKey) <= 0 {
+		orm.uniqueKeys.Clear()
+		return orm
+	}
+
+	orm.uniqueKeys.Add(uniqueKey...)
+	return orm
+}
+
 func (orm *ORM) SelectColLinkStr(s string) *ORM {
 	orm.selectColLinkStr = s
+	return orm
+}
+
+// CustomSQL 设置自定义SQL，可以为空，为空表示移除自定义sql
+func (orm *ORM) CustomSQL(sql string) *ORM {
+	orm.customSQL = sql
 	return orm
 }
 
@@ -167,15 +202,15 @@ func (orm *ORM) Query(pair ...interface{}) *ORM {
 	return orm
 }
 
-func (orm *ORM) Clone() *ORM {
+func (orm *ORM) Clone(ctx context.Context) *ORM {
 	dao := new(ORM)
 	dao.tableName = orm.tableName
 	dao.db = orm.db
 	dao.tx = orm.tx
 	dao.ref = orm.ref
 	dao.selectColLinkStr = orm.selectColLinkStr
-	dao.Q = newMySQLQuery()
-	dao.ctx = context.Background()
+	dao.Q = newDBQuery()
+	dao.ctx = ctx
 	dao.primaryKey = orm.primaryKey
 	return dao
 }
@@ -279,7 +314,7 @@ func (orm *ORM) GroupBy(cols ...string) *ORM {
 }
 
 func (orm *ORM) ClearCache() *ORM {
-	orm.Q = newMySQLQuery()
+	orm.Q = newDBQuery()
 	return orm
 }
 
@@ -315,6 +350,8 @@ func (orm *ORM) HavingSome(where Having) *ORM {
 
 func (orm *ORM) cond(flat bool) *BaseQuery {
 	q := BaseQuery{
+		CustomSQL:        orm.customSQL,
+		PrivateKey:       orm.primaryKey,
 		RefConf:          orm.ref,
 		TableName:        orm.tableName,
 		Where:            orm.Q.Where,
@@ -334,7 +371,13 @@ func (orm *ORM) cond(flat bool) *BaseQuery {
 }
 
 func (orm *ORM) ToSQL(flat bool) string {
+	if orm.customSQL != "" {
+		return orm.customSQL
+	}
+
 	q := BaseQuery{
+		CustomSQL:        orm.customSQL,
+		PrivateKey:       orm.primaryKey,
 		RefConf:          orm.ref,
 		TableName:        orm.tableName,
 		Where:            orm.Q.Where,
@@ -355,6 +398,10 @@ func (orm *ORM) ToSQL(flat bool) string {
 }
 
 func (orm *ORM) PageData(result interface{}, flat bool, pageNo, pageSize uint) (*Paging, error) {
+	if orm.customSQL != "" {
+		return nil, ErrCustomSQL
+	}
+
 	totalCount, err := orm.Count(false)
 	if err != nil {
 		return nil, err
@@ -400,6 +447,8 @@ func (orm *ORM) ToData(result interface{}, flat bool) error {
 	}
 
 	q := BaseQuery{
+		CustomSQL:        orm.customSQL,
+		PrivateKey:       orm.primaryKey,
 		RefConf:          orm.ref,
 		TableName:        orm.tableName,
 		Where:            orm.Q.Where,
@@ -419,8 +468,31 @@ func (orm *ORM) ToData(result interface{}, flat bool) error {
 	return toData(orm.ctx, orm.db, orm.tx, &q, result, flat)
 }
 
+func (orm *ORM) ExecuteSQL(customSQL string) (affectedRow int64, err error) {
+	var ret sql.Result
+	if orm.tx != nil {
+		ret, err = orm.tx.ExecContext(orm.ctx, customSQL)
+	} else if orm.db != nil {
+		ret, err = orm.db.ExecContext(orm.ctx, customSQL)
+	} else {
+		return 0, ErrClient
+	}
+	if err != nil {
+		return 0, err
+	}
+	affectedRow, err = ret.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return
+}
+
 // Exist 检查数据是否存在
 func (orm *ORM) Exist() (bool, error) {
+	if orm.customSQL != "" {
+		return false, ErrCustomSQL
+	}
+
 	if !orm.keepQuery {
 		defer func() {
 			orm.ClearCache()
@@ -428,6 +500,7 @@ func (orm *ORM) Exist() (bool, error) {
 	}
 
 	q := BaseQuery{
+		PrivateKey:       orm.primaryKey,
 		RefConf:          orm.ref,
 		TableName:        orm.tableName,
 		Where:            orm.Q.Where,
@@ -454,12 +527,18 @@ func (orm *ORM) Exist() (bool, error) {
 }
 
 func (orm *ORM) Count(clearCache bool) (int64, error) {
+	if orm.customSQL != "" {
+		return 0, ErrCustomSQL
+	}
+
 	if clearCache {
 		defer func() {
 			orm.ClearCache()
 		}()
 	}
 	q := BaseQuery{
+		CustomSQL:        orm.customSQL,
+		PrivateKey:       orm.primaryKey,
 		RefConf:          orm.ref,
 		TableName:        orm.tableName,
 		Where:            orm.Q.Where,
@@ -882,7 +961,7 @@ func (orm *ORM) SaveMany(data []interface{}, trans bool) (affected int64, err er
 	var sqlArr []string
 
 	for _, d := range data {
-		upsertSQL, err := orm.formatSaveManySQL(d)
+		upsertSQL, err := orm.formatSaveSQL(d)
 		if err != nil {
 			return 0, err
 		}
@@ -949,7 +1028,9 @@ func (orm *ORM) SaveMany(data []interface{}, trans bool) (affected int64, err er
 func (orm *ORM) UpdateByWhere(update map[string]interface{}, where Where) (affected int64, err error) {
 	affected, err = 0, nil
 
-	updateSQL := "update `%s` set %s"
+	dbCore := orm.ref.getDBConf()
+
+	updateSQL := "update " + dbCore.EscStart + "%s" + dbCore.EscEnd + " set %s"
 
 	if update == nil {
 		return 0, fmt.Errorf("update data is nil")
@@ -957,9 +1038,10 @@ func (orm *ORM) UpdateByWhere(update map[string]interface{}, where Where) (affec
 
 	if len(where) > 0 {
 		q := BaseQuery{
-			RefConf:   orm.ref,
-			TableName: orm.tableName,
-			Where:     where,
+			PrivateKey: orm.primaryKey,
+			RefConf:    orm.ref,
+			TableName:  orm.tableName,
+			Where:      where,
 		}
 		updateSQL += " where " + q.GetWhere()
 	}
@@ -971,7 +1053,7 @@ func (orm *ORM) UpdateByWhere(update map[string]interface{}, where Where) (affec
 			k = k[1:]
 			val = fmt.Sprintf("%v", v)
 		} else {
-			value, timeEmpty := formatValue(v)
+			value, timeEmpty := orm.formatValue(v)
 			if timeEmpty {
 				val = "null"
 			} else {
@@ -979,7 +1061,8 @@ func (orm *ORM) UpdateByWhere(update map[string]interface{}, where Where) (affec
 			}
 		}
 
-		updateSet = append(updateSet, fmt.Sprintf("`%s`=%s", k, val))
+		updateSet = append(updateSet, fmt.Sprintf("%s%s%s=%s",
+			dbCore.EscStart, k, dbCore.EscEnd, val))
 	}
 
 	updateSQL = fmt.Sprintf(updateSQL, orm.tableName, util.JoinArr(updateSet, ","))
@@ -1075,6 +1158,7 @@ func (orm *ORM) UpdateMany(data []interface{}, trans bool) (affected int64, err 
 	return
 }
 
+// UpdateOne 主键，id 不能为空，为空将更新失败
 func (orm *ORM) UpdateOne(data interface{}) (affected int64, err error) {
 	updateSQL, err := orm.formatUpdateSQL(data)
 	if err != nil {
@@ -1292,13 +1376,15 @@ func (orm *ORM) ReplaceManySameClos(data []interface{}, cols []string, batchSize
 func (orm *ORM) DeleteByWhere(where map[string]interface{}) (affected int64, err error) {
 	affected, err = 0, nil
 
-	s := "delete from `%s`"
+	dbCore := orm.ref.getDBConf()
+	s := "delete from " + dbCore.EscStart + "%s" + dbCore.EscEnd
 
 	if len(where) > 0 {
 		q := BaseQuery{
-			RefConf:   orm.ref,
-			TableName: orm.tableName,
-			Where:     where,
+			PrivateKey: orm.primaryKey,
+			RefConf:    orm.ref,
+			TableName:  orm.tableName,
+			Where:      where,
 		}
 		s += " where " + q.GetWhere()
 	}
@@ -1325,600 +1411,82 @@ func (orm *ORM) DeleteByWhere(where map[string]interface{}) (affected int64, err
 }
 
 func (orm *ORM) formatInsertSQL(data interface{}) (string, error) {
-	insertSQL := "insert into `%s`(%s) values(%s)"
+	return orm.innerInsertSQL(data)
+}
 
-	if data == nil {
-		return "", fmt.Errorf("insert data is nil")
-	}
-
-	typeErrStr := "type of insert data is []map[string]interface{} or []*struct or []struct"
-	var cols []string
-	var values []string
-
-	switch data := data.(type) {
-	case map[string]interface{}:
-		for k, v := range data {
-			if k[0] == '#' {
-				k = k[1:]
-				err := globalVerifyObj.VerifyFieldName(k)
-				if err != nil {
-					return "", err
-				}
-				cols = append(cols, fmt.Sprintf("`%s`", k))
-				values = append(values, fmt.Sprintf("%v", v))
-				continue
-			}
-
-			err := globalVerifyObj.VerifyFieldName(k)
-			if err != nil {
-				return "", err
-			}
-
-			val, timeEmpty := formatValue(v)
-			if k == orm.primaryKey && (val == "" || val == "0") {
-				continue
-			}
-			if timeEmpty {
-				continue
-			} else {
-				cols = append(cols, fmt.Sprintf("`%s`", k))
-				values = append(values, val)
-			}
-		}
-	default:
-		dataValue := reflect.ValueOf(data)
-		if dataValue.Type().Kind() != reflect.Struct && dataValue.Type().Kind() != reflect.Ptr {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		if dataValue.Type().Kind() == reflect.Ptr {
-			dataValue = dataValue.Elem()
-		}
-
-		if dataValue.Type().Kind() != reflect.Struct {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		for i := 0; i < dataValue.NumField(); i++ {
-			colName := dataValue.Type().Field(i).Tag.Get("json")
-			ref := dataValue.Type().Field(i).Tag.Get("ref")
-			if ref != "" || colName == "" || !dataValue.Type().Field(i).IsExported() {
-				continue
-			}
-
-			err := globalVerifyObj.VerifyFieldName(colName)
-			if err != nil {
-				return "", err
-			}
-
-			val, timeEmpty := formatValue(dataValue.Field(i).Interface())
-			if colName == orm.primaryKey && (val == "" || val == "0") {
-				continue
-			}
-			if timeEmpty {
-				continue
-			} else {
-				cols = append(cols, fmt.Sprintf("`%s`", colName))
-				values = append(values, val)
-			}
-		}
-	}
-	if len(cols) <= 0 || len(values) <= 0 {
-		return "", fmt.Errorf("sql data is empty, please check it")
-	}
-
-	insertSQL = fmt.Sprintf(insertSQL, orm.tableName, util.JoinArr(cols, ","), util.JoinArr(values, ","))
-	return insertSQL, nil
+// 需要主键
+func (orm *ORM) formatUpdateSQL(data interface{}) (string, error) {
+	return orm.innerUpdateSQL(data)
 }
 
 func (orm *ORM) formatInsertManySQL(dataList []interface{}, cols []string) (string, error) {
-	insertSQL := "insert into `%s`(%s) values%s"
-
-	if len(dataList) <= 0 {
-		return "", fmt.Errorf("insert data is nil")
-	}
-
-	typeErrStr := "type of insert data is []map[string]interface{} or []*struct or []struct"
-
-	var valArr []string
-	for _, data := range dataList {
-		var valMap map[string]interface{}
-		switch data := data.(type) {
-		case map[string]interface{}:
-			valMap = data
-		default:
-			dataValue := reflect.ValueOf(data)
-			if dataValue.Type().Kind() != reflect.Struct && dataValue.Type().Kind() != reflect.Ptr {
-				return "", fmt.Errorf(typeErrStr)
-			}
-
-			if dataValue.Type().Kind() == reflect.Ptr {
-				dataValue = dataValue.Elem()
-			}
-
-			if dataValue.Type().Kind() != reflect.Struct {
-				return "", fmt.Errorf(typeErrStr)
-			}
-
-			valMap = map[string]interface{}{}
-
-			for i := 0; i < dataValue.NumField(); i++ {
-				colName := dataValue.Type().Field(i).Tag.Get("json")
-				ref := dataValue.Type().Field(i).Tag.Get("ref")
-				if ref != "" || colName == "" || !dataValue.Type().Field(i).IsExported() {
-					continue
-				}
-
-				valMap[colName] = dataValue.Field(i).Interface()
-			}
-		}
-		if len(valMap) <= 0 {
-			return "", fmt.Errorf("sql data is empty, please check it")
-		}
-
-		subVal := "("
-		for _, colName := range cols {
-			if v, ok := valMap[colName]; ok {
-				val, timeEmpty := formatValue(v)
-				if (colName == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
-					subVal += "null,"
-					continue
-				}
-
-				subVal += val + ","
-			} else if v, ok = valMap["#"+colName]; ok {
-				subVal += fmt.Sprintf("%v,", v)
-			} else {
-				subVal += "null,"
-			}
-		}
-		subVal = subVal[:len(subVal)-1] + ")"
-		valArr = append(valArr, subVal)
-	}
-
-	if len(valArr) <= 0 {
-		return "", fmt.Errorf("insert data is empty")
-	}
-
-	newCols := make([]string, 0, len(cols))
-	for _, k := range cols {
-		err := globalVerifyObj.VerifyFieldName(k)
-		if err != nil {
-			return "", err
-		}
-		newCols = append(newCols, fmt.Sprintf("`%s`", k))
-	}
-	insertSQL = fmt.Sprintf(insertSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(valArr, ","))
-	return insertSQL, nil
-}
-
-func (orm *ORM) formatUpdateSQL(data interface{}) (string, error) {
-	updateSQL := "update `%s` set %s where `%s`=%s"
-
-	if data == nil {
-		return "", fmt.Errorf("update data is nil")
-	}
-
-	typeErrStr := "type of update data is []map[string]interface{} or []*struct or []struct"
-	var upSet []string
-
-	primaryVal := ""
-
-	switch data := data.(type) {
-	case map[string]interface{}:
-		for k, v := range data {
-			if k[0] == '#' {
-				k = k[1:]
-				err := globalVerifyObj.VerifyFieldName(k)
-				if err != nil {
-					return "", err
-				}
-
-				upSet = append(upSet, fmt.Sprintf("`%s`=%v", k, v))
-				continue
-			}
-
-			err := globalVerifyObj.VerifyFieldName(k)
-			if err != nil {
-				return "", err
-			}
-
-			val, timeEmpty := formatValue(v)
-			if k == orm.primaryKey {
-				primaryVal = val
-				continue
-			}
-			if timeEmpty {
-				val = "null"
-			}
-
-			upSet = append(upSet, fmt.Sprintf("`%s`=%s", k, val))
-		}
+	switch orm.ref.dbConf.DBType {
+	case dbtype.MySQL, dbtype.MariaDB, dbtype.SQLServer, dbtype.SQLite2, dbtype.SQLite3, dbtype.Postgres, dbtype.OpenGauss:
+		return orm.innerInsertManySQL(dataList, cols)
+	case dbtype.Oracle:
+		return orm.oracleInsertManySQL(dataList, cols)
 	default:
-		dataValue := reflect.ValueOf(data)
-		if dataValue.Type().Kind() != reflect.Struct && dataValue.Type().Kind() != reflect.Ptr {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		if dataValue.Type().Kind() == reflect.Ptr {
-			dataValue = dataValue.Elem()
-		}
-
-		if dataValue.Type().Kind() != reflect.Struct {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		for i := 0; i < dataValue.NumField(); i++ {
-			colName := dataValue.Type().Field(i).Tag.Get("json")
-			ref := dataValue.Type().Field(i).Tag.Get("ref")
-			if ref != "" || colName == "" || !dataValue.Type().Field(i).IsExported() {
-				continue
-			}
-
-			err := globalVerifyObj.VerifyFieldName(colName)
-			if err != nil {
-				return "", err
-			}
-
-			val, timeEmpty := formatValue(dataValue.Field(i).Interface())
-			if colName == orm.primaryKey {
-				primaryVal = val
-				continue
-			}
-			if timeEmpty {
-				continue
-			}
-
-			upSet = append(upSet, fmt.Sprintf("`%s`=%s", colName, val))
-		}
+		return "", ErrDBType
 	}
-	if primaryVal == "" {
-		return "", fmt.Errorf("sql primary where is empty, please check it")
-	}
-
-	primaryVal = strings.ReplaceAll(primaryVal, "'", "\\'")
-	updateSQL = fmt.Sprintf(updateSQL, orm.tableName, util.JoinArr(upSet, ","), orm.primaryKey, primaryVal)
-	return updateSQL, nil
 }
 
 func (orm *ORM) formatReplaceSQL(data interface{}) (string, error) {
-	replaceSQL := "replace into `%s`(%s) values(%s)"
-
-	if data == nil {
-		return "", fmt.Errorf("insert data is nil")
-	}
-
-	typeErrStr := "type of insert data is []map[string]interface{} or []*struct or []struct"
-	var cols []string
-	var values []string
-
-	switch data := data.(type) {
-	case map[string]interface{}:
-		for k, v := range data {
-			if k[0] == '#' {
-				k = k[1:]
-				err := globalVerifyObj.VerifyFieldName(k)
-				if err != nil {
-					return "", err
-				}
-				cols = append(cols, fmt.Sprintf("`%s`", k))
-				values = append(values, fmt.Sprintf("%v", v))
-				continue
-			}
-
-			err := globalVerifyObj.VerifyFieldName(k)
-			if err != nil {
-				return "", err
-			}
-
-			val, timeEmpty := formatValue(v)
-			if k == orm.primaryKey && (val == "" || val == "0") {
-				continue
-			}
-			if timeEmpty {
-				continue
-			} else {
-				cols = append(cols, fmt.Sprintf("`%s`", k))
-				values = append(values, val)
-			}
-		}
+	switch orm.ref.dbConf.DBType {
+	case dbtype.MySQL, dbtype.MariaDB, dbtype.SQLite2, dbtype.SQLite3:
+		return orm.innerReplaceSQL(data)
+	case dbtype.Oracle, dbtype.SQLServer, dbtype.Postgres, dbtype.OpenGauss:
+		return "", fmt.Errorf("当前数据库不支持Replace方法，请使用Upsert方法")
 	default:
-		dataValue := reflect.ValueOf(data)
-		if dataValue.Type().Kind() != reflect.Struct && dataValue.Type().Kind() != reflect.Ptr {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		if dataValue.Type().Kind() == reflect.Ptr {
-			dataValue = dataValue.Elem()
-		}
-
-		if dataValue.Type().Kind() != reflect.Struct {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		for i := 0; i < dataValue.NumField(); i++ {
-			colName := dataValue.Type().Field(i).Tag.Get("json")
-			ref := dataValue.Type().Field(i).Tag.Get("ref")
-			if ref != "" || colName == "" || !dataValue.Type().Field(i).IsExported() {
-				continue
-			}
-
-			err := globalVerifyObj.VerifyFieldName(colName)
-			if err != nil {
-				return "", err
-			}
-
-			val, timeEmpty := formatValue(dataValue.Field(i).Interface())
-			if colName == orm.primaryKey && (val == "" || val == "0") {
-				continue
-			}
-			if timeEmpty {
-				continue
-			} else {
-				cols = append(cols, fmt.Sprintf("`%s`", colName))
-				values = append(values, val)
-			}
-		}
+		return "", ErrDBType
 	}
-	if len(cols) <= 0 || len(values) <= 0 {
-		return "", fmt.Errorf("sql data is empty, please check it")
-	}
-
-	replaceSQL = fmt.Sprintf(replaceSQL, orm.tableName, util.JoinArr(cols, ","), util.JoinArr(values, ","))
-	return replaceSQL, nil
 }
 
 func (orm *ORM) formatReplaceManySQL(dataList []interface{}, cols []string) (string, error) {
-	replaceSQL := "replace into `%s`(%s) values%s"
-
-	if len(dataList) <= 0 {
-		return "", fmt.Errorf("insert data is nil")
+	switch orm.ref.dbConf.DBType {
+	case dbtype.MySQL, dbtype.MariaDB, dbtype.SQLite2, dbtype.SQLite3:
+		return orm.innerReplaceManySQL(dataList, cols)
+	case dbtype.Oracle, dbtype.SQLServer, dbtype.Postgres, dbtype.OpenGauss:
+		return "", fmt.Errorf("当前数据库不支持Replace方法，请使用Upsert方法")
+	default:
+		return "", ErrDBType
 	}
-
-	typeErrStr := "type of replace data is []map[string]interface{} or []*struct or []struct"
-
-	var valArr []string
-	for _, data := range dataList {
-		var valMap map[string]interface{}
-		switch data := data.(type) {
-		case map[string]interface{}:
-			valMap = data
-		default:
-			dataValue := reflect.ValueOf(data)
-			if dataValue.Type().Kind() != reflect.Struct && dataValue.Type().Kind() != reflect.Ptr {
-				return "", fmt.Errorf(typeErrStr)
-			}
-
-			if dataValue.Type().Kind() == reflect.Ptr {
-				dataValue = dataValue.Elem()
-			}
-
-			if dataValue.Type().Kind() != reflect.Struct {
-				return "", fmt.Errorf(typeErrStr)
-			}
-
-			valMap = map[string]interface{}{}
-
-			for i := 0; i < dataValue.NumField(); i++ {
-				colName := dataValue.Type().Field(i).Tag.Get("json")
-				ref := dataValue.Type().Field(i).Tag.Get("ref")
-				if ref != "" || colName == "" || !dataValue.Type().Field(i).IsExported() {
-					continue
-				}
-
-				valMap[colName] = dataValue.Field(i).Interface()
-			}
-		}
-		if len(valMap) <= 0 {
-			return "", fmt.Errorf("sql data is empty, please check it")
-		}
-
-		subVal := "("
-		for _, colName := range cols {
-			if v, ok := valMap[colName]; ok {
-				val, timeEmpty := formatValue(v)
-				if (colName == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
-					subVal += "null,"
-					continue
-				}
-
-				subVal += val + ","
-			} else if v, ok = valMap["#"+colName]; ok {
-				subVal += fmt.Sprintf("%v,", v)
-			} else {
-				subVal += "null,"
-			}
-		}
-		subVal = subVal[:len(subVal)-1] + ")"
-		valArr = append(valArr, subVal)
-	}
-
-	if len(valArr) <= 0 {
-		return "", fmt.Errorf("replace data is empty")
-	}
-
-	newCols := make([]string, 0, len(cols))
-	for _, k := range cols {
-		err := globalVerifyObj.VerifyFieldName(k)
-		if err != nil {
-			return "", err
-		}
-		newCols = append(newCols, fmt.Sprintf("`%s`", k))
-	}
-	replaceSQL = fmt.Sprintf(replaceSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(valArr, ","))
-	return replaceSQL, nil
 }
 
 func (orm *ORM) formatUpsertSQL(data interface{}) (string, error) {
-	upsertSQL := "insert into `%s`(%s) values(%s) on duplicate key update %s"
-
-	if data == nil {
-		return "", fmt.Errorf("upsert data is nil")
-	}
-
-	typeErrStr := "type of upsert data is []map[string]interface{} or []*struct or []struct"
-	var cols []string
-	var values []string
-	var update []string
-
-	switch data := data.(type) {
-	case map[string]interface{}:
-		for k, v := range data {
-			if k[0] == '#' {
-				k = k[1:]
-				err := globalVerifyObj.VerifyFieldName(k)
-				if err != nil {
-					return "", err
-				}
-				cols = append(cols, fmt.Sprintf("`%s`", k))
-				values = append(values, fmt.Sprintf("%v", v))
-				update = append(update, fmt.Sprintf("`%s`=values(`%s`)", k, k))
-				continue
-			}
-
-			err := globalVerifyObj.VerifyFieldName(k)
-			if err != nil {
-				return "", err
-			}
-
-			val, timeEmpty := formatValue(v)
-			if k == orm.primaryKey && (val == "" || val == "0") {
-				continue
-			}
-			if timeEmpty {
-				continue
-			} else {
-				cols = append(cols, fmt.Sprintf("`%s`", k))
-				values = append(values, val)
-			}
-			update = append(update, fmt.Sprintf("`%s`=values(`%s`)", k, k))
-		}
+	switch orm.ref.dbConf.DBType {
+	case dbtype.MySQL, dbtype.MariaDB:
+		return orm.mysqlUpsertSQL(data)
+	case dbtype.SQLite2, dbtype.SQLite3:
+		return orm.sqliteUpsertSQL(data)
+	case dbtype.Postgres, dbtype.OpenGauss:
+		return orm.postgresUpsertSQL(data)
+	case dbtype.SQLServer:
+		return orm.sqlserverUpsertSQL(data)
+	case dbtype.Oracle:
+		return orm.oracleUpsertSQL(data)
 	default:
-		dataValue := reflect.ValueOf(data)
-		if dataValue.Type().Kind() != reflect.Struct && dataValue.Type().Kind() != reflect.Ptr {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		if dataValue.Type().Kind() == reflect.Ptr {
-			dataValue = dataValue.Elem()
-		}
-
-		if dataValue.Type().Kind() != reflect.Struct {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		for i := 0; i < dataValue.NumField(); i++ {
-			colName := dataValue.Type().Field(i).Tag.Get("json")
-			ref := dataValue.Type().Field(i).Tag.Get("ref")
-			if ref != "" || colName == "" || !dataValue.Type().Field(i).IsExported() {
-				continue
-			}
-
-			val, timeEmpty := formatValue(dataValue.Field(i).Interface())
-			if colName == orm.primaryKey && (val == "" || val == "0") {
-				continue
-			}
-			if timeEmpty {
-				continue
-			} else {
-				cols = append(cols, fmt.Sprintf("`%s`", colName))
-				values = append(values, val)
-			}
-			update = append(update, fmt.Sprintf("`%s`=values(`%s`)", colName, colName))
-		}
+		return "", ErrDBType
 	}
-	if len(cols) <= 0 || len(values) <= 0 {
-		return "", fmt.Errorf("sql data is empty, please check it")
-	}
-
-	upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(cols, ","), util.JoinArr(values, ","), util.JoinArr(update, ","))
-	return upsertSQL, nil
 }
 
 func (orm *ORM) formatUpsertManySQL(dataList []interface{}, cols []string) (string, error) {
-	upsertSQL := "insert into `%s`(%s) values%s on duplicate key update %s"
-
-	if len(dataList) <= 0 {
-		return "", fmt.Errorf("upsert data is nil")
+	switch orm.ref.dbConf.DBType {
+	case dbtype.MySQL, dbtype.MariaDB:
+		return orm.mysqlUpsertManySQL(dataList, cols)
+	case dbtype.SQLite2, dbtype.SQLite3:
+		return orm.sqliteUpsertManySQL(dataList, cols)
+	case dbtype.Postgres, dbtype.OpenGauss:
+		return orm.postgresUpsertManySQL(dataList, cols)
+	case dbtype.SQLServer:
+		return orm.sqlserverUpsertManySQL(dataList, cols)
+	case dbtype.Oracle:
+		return orm.oracleUpsertManySQL(dataList, cols)
+	default:
+		return "", ErrDBType
 	}
-
-	typeErrStr := "type of upsert data is []map[string]interface{} or []*struct or []struct"
-
-	var valArr []string
-	for _, data := range dataList {
-		var valMap map[string]interface{}
-		switch data := data.(type) {
-		case map[string]interface{}:
-			valMap = data
-		default:
-			dataValue := reflect.ValueOf(data)
-			if dataValue.Type().Kind() != reflect.Struct && dataValue.Type().Kind() != reflect.Ptr {
-				return "", fmt.Errorf(typeErrStr)
-			}
-
-			if dataValue.Type().Kind() == reflect.Ptr {
-				dataValue = dataValue.Elem()
-			}
-
-			if dataValue.Type().Kind() != reflect.Struct {
-				return "", fmt.Errorf(typeErrStr)
-			}
-
-			valMap = map[string]interface{}{}
-
-			for i := 0; i < dataValue.NumField(); i++ {
-				colName := dataValue.Type().Field(i).Tag.Get("json")
-				ref := dataValue.Type().Field(i).Tag.Get("ref")
-				if ref != "" || colName == "" || !dataValue.Type().Field(i).IsExported() {
-					continue
-				}
-
-				valMap[colName] = dataValue.Field(i).Interface()
-			}
-		}
-		if len(valMap) <= 0 {
-			return "", fmt.Errorf("sql data is empty, please check it")
-		}
-
-		subVal := "("
-		for _, colName := range cols {
-			if v, ok := valMap[colName]; ok {
-				val, timeEmpty := formatValue(v)
-				if (colName == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
-					subVal += "null,"
-					continue
-				}
-
-				subVal += val + ","
-			} else if v, ok = valMap["#"+colName]; ok {
-				subVal += fmt.Sprintf("%v,", v)
-			} else {
-				subVal += "null,"
-			}
-		}
-		subVal = subVal[:len(subVal)-1] + ")"
-		valArr = append(valArr, subVal)
-	}
-
-	if len(valArr) <= 0 {
-		return "", fmt.Errorf("upsert data is empty")
-	}
-
-	newCols := make([]string, 0, len(cols))
-	updateCols := make([]string, 0, len(cols))
-	for _, k := range cols {
-		err := globalVerifyObj.VerifyFieldName(k)
-		if err != nil {
-			return "", err
-		}
-		newCols = append(newCols, fmt.Sprintf("`%s`", k))
-		updateCols = append(updateCols, fmt.Sprintf("`%s`=values(`%s`)", k, k))
-	}
-	upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(valArr, ","), util.JoinArr(updateCols, ","))
-	return upsertSQL, nil
 }
 
-func (orm *ORM) formatSaveManySQL(data interface{}) (string, error) {
+func (orm *ORM) formatSaveSQL(data interface{}) (string, error) {
 	typeErrStr := "type of upsert data is []map[string]interface{} or []*struct or []struct"
 
 	var valMap map[string]interface{}
@@ -1959,4 +1527,76 @@ func (orm *ORM) formatSaveManySQL(data interface{}) (string, error) {
 		return orm.formatUpdateSQL(valMap)
 	}
 	return orm.formatInsertSQL(data)
+}
+
+func (orm *ORM) formatValue(raw interface{}) (ret string, timeEmpty bool) {
+	ret, timeEmpty = "", false
+	if raw == nil {
+		ret = "null"
+		return
+	}
+
+	switch raw := raw.(type) {
+	case string:
+		ret = raw
+		ret = strings.ReplaceAll(ret, "'", orm.ref.dbConf.StrEsc+"'")
+		ret = fmt.Sprintf("'%s'", ret)
+	case time.Time:
+		if raw.IsZero() {
+			timeEmpty = true
+			break
+		}
+
+		ret = time2Str(raw)
+		ret = fmt.Sprintf("'%s'", ret)
+		if orm.ref.dbConf.DBType == dbtype.Oracle {
+			ret = oracleDateTime(ret, false)
+		}
+	case *time.Time:
+		if raw.IsZero() {
+			timeEmpty = true
+			break
+		}
+
+		ret = time2Str(*raw)
+		ret = fmt.Sprintf("'%s'", ret)
+		if orm.ref.dbConf.DBType == dbtype.Oracle {
+			ret = oracleDateTime(ret, false)
+		}
+	case bool:
+		if raw {
+			ret = "1"
+		} else {
+			ret = "0"
+		}
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		ret = fmt.Sprintf("%v", raw)
+	default:
+		def := reflect.TypeOf(raw)
+		if def.Kind() == reflect.String {
+			ret = fmt.Sprintf("%v", raw)
+			ret = strings.ReplaceAll(ret, "'", orm.ref.dbConf.StrEsc+"'")
+			ret = fmt.Sprintf("'%s'", ret)
+			return
+		}
+
+		ret = util.InterfaceToString(raw)
+		ret = strings.ReplaceAll(ret, "'", orm.ref.dbConf.StrEsc+"'")
+		ret = fmt.Sprintf("'%s'", ret)
+	}
+	return
+}
+
+func (orm *ORM) checkUK(colSet set.Set[string]) bool {
+	if orm.uniqueKeys.Empty() {
+		return false
+	}
+
+	uk := orm.uniqueKeys.ToList()
+	for _, k := range uk {
+		if !colSet.Has(k) {
+			return false
+		}
+	}
+	return true
 }

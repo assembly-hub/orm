@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/assembly-hub/basics/util"
+
+	"github.com/assembly-hub/orm/dbtype"
 )
 
 type selectModel struct {
@@ -30,6 +32,8 @@ type joinModel struct {
 }
 
 type queryModel struct {
+	PrivateKey      string
+	DBCore          *dbCoreData
 	MainTable       string
 	MainAlias       string
 	Distinct        bool
@@ -71,18 +75,20 @@ func (p *queryModel) selectSQL() string {
 func (p *queryModel) joinSQL() string {
 	sql := ""
 	for _, join := range p.JoinList {
+		joinStr := ""
 		if join.Type.value() != "" {
-			join.Type += " "
+			joinStr = join.Type.value() + " "
 		}
 		if join.JoinAlias != "" {
-			sql += " " + join.Type.value() + "join " + join.JoinTable + " as " + join.JoinAlias
+			if p.DBCore.DBType == dbtype.Oracle {
+				sql += " " + joinStr + "join " + join.JoinTable + " " + join.JoinAlias
+			} else {
+				sql += " " + joinStr + "join " + join.JoinTable + " as " + join.JoinAlias
+			}
 		} else {
-			sql += " " + join.Type.value() + "join " + join.JoinTable
+			sql += " " + joinStr + "join " + join.JoinTable
 		}
 
-		if join.Type.isNatural() {
-			continue
-		}
 		where := ""
 		mt := join.MainTable
 		if join.MainAlias != "" {
@@ -141,204 +147,30 @@ func (p *queryModel) andSQL(where map[string]interface{}) string {
 	return p.whereSQL(where, " and ")
 }
 
-func (p *queryModel) formatOrContainsSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string) string {
-	subSQL := ""
-	switch colOperator {
-	case "or_icontains":
-		if rawVal != "" {
-			subSQL = colName + " like " + "'%" + rawVal + "%'"
-		} else if len(rawStrArr) > 0 {
-			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like " + "'%" + v + "%'"
-				} else {
-					subSQL += " or " + colName + " like " + "'%" + v + "%'"
-				}
-			}
-			subSQL += ")"
-		}
-	case "or_contains":
-		if rawVal != "" {
-			subSQL = colName + " like binary " + "'%" + rawVal + "%'"
-		} else if len(rawStrArr) > 0 {
-			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like binary " + "'%" + v + "%'"
-				} else {
-					subSQL += " or " + colName + " like binary " + "'%" + v + "%'"
-				}
-			}
-			subSQL += ")"
-		}
-	default:
-		panic(fmt.Sprintf("col[%s] operation[%s] no definition", colName, colOperator))
-	}
-
-	return subSQL
-}
-
-func (p *queryModel) formatOrLikeSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string) string {
-	subSQL := ""
-	switch colOperator {
-	case "or_istartswith":
-		if rawVal != "" {
-			subSQL = colName + " like " + "'" + rawVal + "%'"
-		} else if len(rawStrArr) > 0 {
-			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like " + "'" + v + "%'"
-				} else {
-					subSQL += " or " + colName + " like " + "'" + v + "%'"
-				}
-			}
-			subSQL += ")"
-		}
-	case "or_startswith":
-		if rawVal != "" {
-			subSQL = colName + " like binary " + "'" + rawVal + "%'"
-		} else if len(rawStrArr) > 0 {
-			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like binary " + "'" + v + "%'"
-				} else {
-					subSQL += " or " + colName + " like binary " + "'" + v + "%'"
-				}
-			}
-			subSQL += ")"
-		}
-	case "or_iendswith":
-		if rawVal != "" {
-			subSQL = colName + " like " + "'%" + rawVal + "'"
-		} else if len(rawStrArr) > 0 {
-			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like " + "'%" + v + "'"
-				} else {
-					subSQL += " or " + colName + " like " + "'%" + v + "'"
-				}
-			}
-			subSQL += ")"
-		}
-	case "or_endswith":
-		if rawVal != "" {
-			subSQL = colName + " like binary " + "'%" + rawVal + "'"
-		} else if len(rawStrArr) > 0 {
-			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like binary " + "'%" + v + "'"
-				} else {
-					subSQL += " or " + colName + " like binary " + "'%" + v + "'"
-				}
-			}
-			subSQL += ")"
-		}
-	default:
-		subSQL = p.formatOrContainsSQL(colOperator, colName, val, rawVal, rawStrArr)
-	}
-
-	return subSQL
-}
-
-func (p *queryModel) formatLikeSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string) string {
-	subSQL := ""
-	switch colOperator {
-	case "istartswith":
-		if rawVal != "" {
-			subSQL = colName + " like " + "'" + rawVal + "%'"
-		}
-	case "startswith":
-		if rawVal != "" {
-			subSQL = colName + " like binary " + "'" + rawVal + "%'"
-		}
-	case "iendswith":
-		if rawVal != "" {
-			subSQL = colName + " like " + "'%" + rawVal + "'"
-		}
-	case "endswith":
-		if rawVal != "" {
-			subSQL = colName + " like binary " + "'%" + rawVal + "'"
-		}
-	case "icontains":
-		if rawVal != "" {
-			subSQL = colName + " like " + "'%" + rawVal + "%'"
-		} else if len(rawStrArr) > 0 {
-			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like " + "'%" + v + "%'"
-				} else {
-					subSQL += " and " + colName + " like " + "'%" + v + "%'"
-				}
-			}
-			subSQL += ")"
-		}
-	case "contains":
-		if rawVal != "" {
-			subSQL = colName + " like binary " + "'%" + rawVal + "%'"
-		} else if len(rawStrArr) > 0 {
-			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like binary " + "'%" + v + "%'"
-				} else {
-					subSQL += " and " + colName + " like binary " + "'%" + v + "%'"
-				}
-			}
-			subSQL += ")"
-		}
-	default:
-		subSQL = p.formatOrLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
-	}
-
-	return subSQL
-}
-
 func (p *queryModel) formatSubSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string,
 	colData interface{}) string {
 	subSQL := ""
-	switch colOperator {
-	case "eq":
-		subSQL = colName + "=" + val
-	case "bin_eq":
-		subSQL = "binary " + colName + "=" + val
-	case "between":
-		subSQL = colName + " between " + val
-	case "lt":
-		subSQL = colName + "<" + val
-	case "bin_lt":
-		subSQL = "binary " + colName + "<" + val
-	case "lte":
-		subSQL = colName + "<=" + val
-	case "bin_lte":
-		subSQL = "binary " + colName + "<=" + val
-	case "gt":
-		subSQL = colName + ">" + val
-	case "bin_gt":
-		subSQL = "binary " + colName + ">" + val
-	case "gte":
-		subSQL = colName + ">=" + val
-	case "bin_gte":
-		subSQL = "binary " + colName + ">=" + val
-	case "ne":
-		subSQL = colName + "<>" + val
-	case "bin_ne":
-		subSQL = "binary " + colName + "<>" + val
-	case "in":
-		subSQL = colName + " in " + val
-	case "bin_in":
-		subSQL = "binary " + colName + " in " + val
-	case "nin":
-		subSQL = colName + " not in " + val
-	case "bin_nin":
-		subSQL = "binary " + colName + " not in " + val
-	case "date":
-		subSQL = "date(" + colName + ")=" + val
-	case "null":
-		if colData.(bool) {
-			subSQL = colName + " is null"
-		} else {
-			subSQL = colName + " is not null"
+
+	opArr := strings.Split(colOperator, "_")
+
+	if len(opArr) == 0 {
+		panic(fmt.Errorf("operator[] cannot be empty"))
+	}
+
+	defer func() {
+		if e := recover(); e != nil {
+			panic(fmt.Sprintf("field[%s]'s operator[%s] %v", colName, colOperator, e))
 		}
-	default:
-		subSQL = p.formatLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
+	}()
+
+	if len(opArr) == 1 {
+		subSQL = p.innerFormatSubSQL(colOperator, colName, val, rawVal, rawStrArr, colData)
+	} else if opArr[0] == "bin" || opArr[0] == "b" {
+		subSQL = p.innerBinFormatSubSQL(opArr[1], colName, val, rawVal, rawStrArr, colData)
+	} else if opArr[0] == "ignore" || opArr[0] == "i" {
+		subSQL = p.innerIgnoreFormatSubSQL(opArr[1], colName, val, rawVal, rawStrArr, colData)
+	} else {
+		panic(fmt.Errorf("operator[%s] is not supported", colOperator))
 	}
 
 	return subSQL
@@ -346,51 +178,58 @@ func (p *queryModel) formatSubSQL(colOperator string, colName string, val, rawVa
 
 func (p *queryModel) formatTimeValue(colOperator, colName string, colData interface{}) (val string, rawVal string, rawStrArr []string) {
 	switch colData := colData.(type) {
-	case time.Time:
+	case time.Time, *time.Time:
 		if colOperator == "between" {
-			panic("between where length must be 2")
+			panic(ErrBetweenValueMatch)
 		}
 
 		rawVal = time2Str(colData)
-		val = "'" + rawVal + "'"
-		if colOperator == "date" {
-			val = "'" + strings.Split(rawVal, " ")[0] + "'"
-		}
-	case *time.Time:
-		if colOperator == "between" {
-			panic("between where length must be 2")
-		}
-
-		rawVal = time2Str(*(colData))
-		val = "'" + rawVal + "'"
-		if colOperator == "date" {
-			val = "'" + strings.Split(rawVal, " ")[0] + "'"
+		if p.DBCore.DBType == dbtype.Oracle {
+			val = oracleDateTime(rawVal, false)
+		} else {
+			val = innerDateTime(rawVal, colOperator)
 		}
 	case []time.Time:
 		if colOperator == "between" {
 			if len(colData) != 2 {
-				panic("between where length must be 2")
+				panic(ErrBetweenValueMatch)
 			}
-			val = fmt.Sprintf("'%s'", time2Str(colData[0])) + " and " +
-				fmt.Sprintf("'%s'", time2Str(colData[1]))
+			if p.DBCore.DBType == dbtype.Oracle {
+				val = oracleDateTime(time2Str(colData[0]), false) + " and " +
+					oracleDateTime(time2Str(colData[1]), false)
+			} else {
+				val = "'" + time2Str(colData[0]) + "' and '" + time2Str(colData[1]) + "'"
+			}
 		} else {
 			for _, v := range colData {
-				rawStrArr = append(rawStrArr, time2Str(v))
+				if p.DBCore.DBType == dbtype.Oracle {
+					rawStrArr = append(rawStrArr, oracleDateTime(time2Str(v), false))
+				} else {
+					rawStrArr = append(rawStrArr, "'"+time2Str(v)+"'")
+				}
 			}
-			val = "(" + connectStrArr(rawStrArr, ",", "'", "'") + ")"
+			val = "(" + util.JoinArr[string](rawStrArr, ",") + ")"
 		}
 	case []*time.Time:
 		if colOperator == "between" {
 			if len(colData) != 2 {
-				panic("between where length must be 2")
+				panic(ErrBetweenValueMatch)
 			}
-			val = fmt.Sprintf("'%s'", time2Str(*(colData[0]))) + " and " +
-				fmt.Sprintf("'%s'", time2Str(*(colData[1])))
+			if p.DBCore.DBType == dbtype.Oracle {
+				val = oracleDateTime(time2Str(colData[0]), false) + " and " +
+					oracleDateTime(time2Str(colData[1]), false)
+			} else {
+				val = "'" + time2Str(colData[0]) + "' and '" + time2Str(colData[1]) + "'"
+			}
 		} else {
 			for _, v := range colData {
-				rawStrArr = append(rawStrArr, time2Str(*v))
+				if p.DBCore.DBType == dbtype.Oracle {
+					rawStrArr = append(rawStrArr, oracleDateTime(time2Str(v), false))
+				} else {
+					rawStrArr = append(rawStrArr, "'"+time2Str(v)+"'")
+				}
 			}
-			val = "(" + connectStrArr(rawStrArr, ",", "'", "'") + ")"
+			val = "(" + util.JoinArr[string](rawStrArr, ",") + ")"
 		}
 	}
 	return
@@ -400,7 +239,7 @@ func (p *queryModel) formatSQLValue(colOperator, colName string, colData interfa
 	switch colData := colData.(type) {
 	case queryModel:
 		if colOperator == "between" {
-			panic("between where length must be 2")
+			panic(ErrBetweenValueMatch)
 		}
 
 		rawVal = colData.SQL()
@@ -409,7 +248,7 @@ func (p *queryModel) formatSQLValue(colOperator, colName string, colData interfa
 		}
 	case *queryModel:
 		if colOperator == "between" {
-			panic("between where length must be 2")
+			panic(ErrBetweenValueMatch)
 		}
 
 		rawVal = colData.SQL()
@@ -418,21 +257,21 @@ func (p *queryModel) formatSQLValue(colOperator, colName string, colData interfa
 		}
 	case string:
 		if colOperator == "between" {
-			panic("between where length must be 2")
+			panic(ErrBetweenValueMatch)
 		}
 
-		rawVal = strings.ReplaceAll(colData, "'", "\\'")
-		val = "'" + rawVal + "'"
+		rawVal = strings.ReplaceAll(colData, "'", p.DBCore.StrEsc+"'")
+		val = p.DBCore.EscStart + rawVal + p.DBCore.EscEnd
 	case []string:
 		if colOperator == "between" {
 			if len(colData) != 2 {
-				panic("between where length must be 2")
+				panic(ErrBetweenValueMatch)
 			}
-			val = strings.ReplaceAll(colData[0], "'", "\\'") + " and " +
-				strings.ReplaceAll(colData[1], "'", "\\'")
+			val = strings.ReplaceAll(colData[0], "'", p.DBCore.StrEsc+"'") + " and " +
+				strings.ReplaceAll(colData[1], "'", p.DBCore.StrEsc+"'")
 		} else {
 			for _, v := range colData {
-				v = strings.ReplaceAll(v, "'", "\\'")
+				v = strings.ReplaceAll(v, "'", p.DBCore.StrEsc+"'")
 				rawStrArr = append(rawStrArr, v)
 			}
 			val = "(" + connectStrArr(rawStrArr, ",", "'", "'") + ")"
@@ -440,21 +279,21 @@ func (p *queryModel) formatSQLValue(colOperator, colName string, colData interfa
 	case []interface{}:
 		if colOperator == "between" {
 			if len(colData) != 2 {
-				panic("between where length must be 2")
+				panic(ErrBetweenValueMatch)
 			}
-			val = strings.ReplaceAll(fmt.Sprintf("%v", colData[0]), "'", "\\'") + " and " +
-				strings.ReplaceAll(fmt.Sprintf("%v", colData[1]), "'", "\\'")
+			val = strings.ReplaceAll(fmt.Sprintf("%v", colData[0]), "'", p.DBCore.StrEsc+"'") + " and " +
+				strings.ReplaceAll(fmt.Sprintf("%v", colData[1]), "'", p.DBCore.StrEsc+"'")
 		} else {
 			for _, vv := range colData {
 				v := fmt.Sprintf("%v", vv)
-				v = strings.ReplaceAll(v, "'", "\\'")
+				v = strings.ReplaceAll(v, "'", p.DBCore.StrEsc+"'")
 				rawStrArr = append(rawStrArr, v)
 			}
 			val = "(" + connectStrArr(rawStrArr, ",", "'", "'") + ")"
 		}
 	case bool:
 		if colOperator == "between" {
-			panic("between where length must be 2")
+			panic(ErrBetweenValueMatch)
 		}
 
 		if colData {
@@ -465,7 +304,7 @@ func (p *queryModel) formatSQLValue(colOperator, colName string, colData interfa
 		rawVal = val
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
 		if colOperator == "between" {
-			panic("between where length must be 2")
+			panic(ErrBetweenValueMatch)
 		}
 
 		val = fmt.Sprintf("%v", colData)
@@ -478,7 +317,7 @@ func (p *queryModel) formatSQLValue(colOperator, colName string, colData interfa
 
 		if colOperator == "between" {
 			if slice.Len() != 2 {
-				panic("between where length must be 2")
+				panic(ErrBetweenValueMatch)
 			}
 			val = fmt.Sprintf("%v", slice.Index(0).Interface()) + " and " +
 				fmt.Sprintf("%v", slice.Index(1).Interface())
@@ -494,11 +333,11 @@ func (p *queryModel) formatSQLValue(colOperator, colName string, colData interfa
 		val, rawVal, rawStrArr = p.formatTimeValue(colOperator, colName, colData)
 	default:
 		if colOperator == "between" {
-			panic("between where length must be 2")
+			panic(ErrBetweenValueMatch)
 		}
 
-		rawVal = strings.ReplaceAll(fmt.Sprintf("%v", colData), "'", "\\'")
-		val = "'" + rawVal + "'"
+		rawVal = strings.ReplaceAll(fmt.Sprintf("%v", colData), "'", p.DBCore.StrEsc+"'")
+		val = p.DBCore.EscStart + rawVal + p.DBCore.EscEnd
 	}
 
 	return
@@ -627,83 +466,19 @@ func (p *queryModel) GetWhere() string {
 }
 
 func (p *queryModel) Count() string {
-	sql := "select "
-	sel := p.selectSQL()
-	if p.MainTable == "" {
-		panic("MainTable is nil")
-	}
-	if p.MainAlias != "" {
-		sql += sel + " from " + p.MainTable + " as " + p.MainAlias
-	} else {
-		sql += sel + " from " + p.MainTable
-	}
-
-	join := p.joinSQL()
-	if join != "" {
-		sql += join
-	}
-
-	where := p.andSQL(p.Where)
-	if where != "" {
-		sql += " where " + where
-	}
-
-	if len(p.GroupBy) > 0 {
-		sql += " group by " + util.JoinArr(p.GroupBy, ",")
-	}
-
-	if len(p.GroupBy) > 0 && len(p.Having) > 0 {
-		sql += " having " + p.andSQL(p.Having)
-	}
-
-	sql = fmt.Sprintf("SELECT COUNT(*) as `c` from (%s) as `count_tb`", sql)
-	return sql
+	return p.countDB()
 }
 
 func (p *queryModel) SQL() string {
-	sql := "select "
-	sel := p.selectSQL()
-	if p.MainTable == "" {
-		panic("MainTable is nil")
+	switch p.DBCore.DBType {
+	case dbtype.MySQL, dbtype.MariaDB, dbtype.OpenGauss, dbtype.Postgres:
+		return p.queryMySQL()
+	case dbtype.SQLite2, dbtype.SQLite3:
+		return p.querySQLite()
+	case dbtype.SQLServer:
+		return p.querySQLServer()
+	case dbtype.Oracle:
+		return p.queryOracle()
 	}
-	if p.MainAlias != "" {
-		sql += sel + " from " + p.MainTable + " as " + p.MainAlias
-	} else {
-		sql += sel + " from " + p.MainTable
-	}
-
-	join := p.joinSQL()
-	if join != "" {
-		sql += join
-	}
-
-	where := p.andSQL(p.Where)
-	if where != "" {
-		sql += " where " + where
-	}
-
-	if len(p.GroupBy) > 0 {
-		sql += " group by " + util.JoinArr(p.GroupBy, ",")
-	}
-
-	if len(p.GroupBy) > 0 && len(p.Having) > 0 {
-		sql += " having " + p.andSQL(p.Having)
-	}
-
-	order := p.orderSQL()
-	if order != "" {
-		sql += " order by " + order
-	}
-
-	if len(p.Limit) == 1 {
-		sql += " limit " + util.IntToStr(int64(p.Limit[0]))
-	} else if len(p.Limit) == 2 {
-		sql += fmt.Sprintf(" limit %d,%d", p.Limit[0], p.Limit[1])
-	}
-
-	if p.SelectForUpdate {
-		sql += " for update"
-	}
-
-	return sql
+	return ""
 }

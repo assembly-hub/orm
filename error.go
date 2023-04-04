@@ -7,3 +7,7 @@ import (
 
 var ErrClient = fmt.Errorf("db and tx are all nil")
 var ErrTargetNotSettable = errors.New("[scanner]: target is not settable! a pointer is required")
+var ErrBetweenValueMatch = errors.New("[between]: the parameter array length is required to be 2")
+var ErrCustomSQL = errors.New("custom sql does not allow this operation")
+var ErrDBType = errors.New("the current database type is not currently supported")
+var ErrDBFunc = errors.New("this method is not currently supported in the current database")

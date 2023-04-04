@@ -32,7 +32,8 @@ func (d *defaultVerify) VerifyTagName(name string) error {
 
 	for _, ch := range name {
 		if !(ch == '_' || ch == '-' || (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z')) {
-			return fmt.Errorf("tag name[%s] cannot have \"%c\"", name, ch)
+			return fmt.Errorf("tag name[%s] cannot have \"%c\", "+
+				"customize verify as needed to achieve interface \"Verify\"", name, ch)
 		}
 	}
 
@@ -46,7 +47,8 @@ func (d *defaultVerify) VerifyTableName(name string) error {
 
 	for _, ch := range name {
 		if !(ch == '_' || ch == '-' || (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z')) {
-			return fmt.Errorf("table name[%s] cannot have \"%c\"", name, ch)
+			return fmt.Errorf("table name[%s] cannot have \"%c\", "+
+				"customize verify as needed to achieve interface \"Verify\"", name, ch)
 		}
 	}
 
@@ -60,7 +62,8 @@ func (d *defaultVerify) VerifyFieldName(name string) error {
 
 	for _, ch := range name {
 		if !(ch == '_' || ch == '-' || (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z')) {
-			return fmt.Errorf("field name[%s] cannot have \"%c\"", name, ch)
+			return fmt.Errorf("field name[%s] cannot have \"%c\", "+
+				"customize verify as needed to achieve interface \"Verify\"", name, ch)
 		}
 	}
 

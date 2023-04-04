@@ -14,7 +14,6 @@ import (
 
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
-	_ "github.com/go-sql-driver/mysql"
 )
 
 const (
@@ -31,60 +30,22 @@ const (
 	jsonOther = structJSONType(3)
 )
 
-func time2Str(t time.Time) string {
-	return t.Format("2006-01-02 15:04:05")
+func time2Str(t interface{}) string {
+	switch t := t.(type) {
+	case time.Time:
+		return t.Format("2006-01-02 15:04:05")
+	case *time.Time:
+		return t.Format("2006-01-02 15:04:05")
+	}
+	panic("parameter's type must be time.Time")
 }
 
-func formatValue(raw interface{}) (ret string, timeEmpty bool) {
-	ret, timeEmpty = "", false
-	if raw == nil {
-		ret = "null"
-		return
+func str2Time(s string) time.Time {
+	t, err := time.Parse("2006-01-02 15:04:05", s)
+	if err != nil {
+		panic(err)
 	}
-
-	switch raw := raw.(type) {
-	case string:
-		ret = raw
-		ret = strings.ReplaceAll(ret, "'", "\\'")
-		ret = fmt.Sprintf("'%s'", ret)
-	case time.Time:
-		if raw.IsZero() {
-			timeEmpty = true
-			break
-		}
-
-		ret = time2Str(raw)
-		ret = fmt.Sprintf("'%s'", ret)
-	case *time.Time:
-		if raw.IsZero() {
-			timeEmpty = true
-			break
-		}
-
-		ret = time2Str(*raw)
-		ret = fmt.Sprintf("'%s'", ret)
-	case bool:
-		if raw {
-			ret = "1"
-		} else {
-			ret = "0"
-		}
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
-		ret = fmt.Sprintf("%v", raw)
-	default:
-		def := reflect.TypeOf(raw)
-		if def.Kind() == reflect.String {
-			ret = fmt.Sprintf("%v", raw)
-			ret = strings.ReplaceAll(ret, "'", "\\'")
-			ret = fmt.Sprintf("'%s'", ret)
-			return
-		}
-
-		ret = util.InterfaceToString(raw)
-		ret = strings.ReplaceAll(ret, "'", "\\'")
-		ret = fmt.Sprintf("'%s'", ret)
-	}
-	return
+	return t
 }
 
 func prepareValues(values []interface{}, columnTypes []*sql.ColumnType, columns []string) {

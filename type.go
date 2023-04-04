@@ -3,8 +3,6 @@ package orm
 
 import (
 	"database/sql"
-
-	_ "github.com/go-sql-driver/mysql"
 )
 
 type Tx = sql.Tx
