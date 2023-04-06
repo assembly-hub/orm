@@ -5,11 +5,11 @@ go 1.19
 require (
 	gitee.com/opengauss/openGauss-connector-go-pq v1.0.4
 	github.com/assembly-hub/basics v1.2.0
-	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/go-sql-driver/mysql v1.7.0
 	github.com/jackc/pgx v3.6.2+incompatible
 	github.com/mattn/go-oci8 v0.1.1
 	github.com/mattn/go-sqlite3 v1.14.16
+	github.com/microsoft/go-mssqldb v0.21.0
 )
 
 require (
@@ -23,6 +23,6 @@ require (
 	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d // indirect
-	golang.org/x/text v0.3.6 // indirect
+	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 )
