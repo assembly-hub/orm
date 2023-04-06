@@ -3,8 +3,7 @@
 mysql mariadb sqlserver postgres opengauss sqllite oracle orm工具，提供丰富的CURD的功能，将sql的研发编写转为orm语法结构的编写，大大提高研发效率，降低业务复杂度
 
 ## 算子语法
-### mysql
-#### where、order、group、having等语法
+### where、order、group、having等语法
 ```
 每种算子均支持 强制忽略大小写查询和强制区分大小写查询，用法为：key__ignore_eq，key__bin_eq 或简写 key__i_eq，key__b_eq
 where 条件 支持子查询
@@ -38,7 +37,7 @@ or_like : 参数为数组，针对数组每个元素分别取 like，之后条�
 原始数据，#修饰的字段为原始字段，不做处理，其他的字段会根据tag计算
 ~ 为条件取反，必须在最前面，可用在所有算子前面，如果与#连用，#应在~后面，如：~#test
 ```
-#### select语法
+### select语法
 ```
 Select 参数：* 主表所有字段；tag.* tag对应表所有字段；tag1.tag2.* tag1表的tag2的所有字段；以此类推
 *0 等价 * 只考虑主表，不展开子表
