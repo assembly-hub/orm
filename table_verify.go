@@ -1,4 +1,4 @@
-// package orm
+// Package orm
 package orm
 
 import "fmt"

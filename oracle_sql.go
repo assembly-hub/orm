@@ -38,15 +38,18 @@ func (p *queryModel) queryOracle() string {
 
 	limitSQL := ""
 	if len(p.Limit) == 1 {
-		sql += "rownum<=" + util.IntToStr(int64(p.Limit[0]))
+		limitSQL += "rownum<=" + util.IntToStr(int64(p.Limit[0]))
 	} else if len(p.Limit) == 2 {
-		sql += fmt.Sprintf("rownum>%d and rownum<=%d", p.Limit[0], p.Limit[0]+p.Limit[1])
+		limitSQL += fmt.Sprintf("rownum>%d and rownum<=%d", p.Limit[0], p.Limit[0]+p.Limit[1])
 	}
 
 	where := p.andSQL(p.Where)
 	if where != "" {
-		sql += " where " + where + " and " + limitSQL
-	} else {
+		if limitSQL != "" {
+			limitSQL = " and " + limitSQL
+		}
+		sql += " where " + where + limitSQL
+	} else if limitSQL != "" {
 		sql += " where " + limitSQL
 	}
 

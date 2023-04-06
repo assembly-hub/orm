@@ -23,7 +23,7 @@ type Table1 struct {
 type Table2 struct {
 	ID   int     `json:"id"`
 	Name string  `json:"name"`
-	Tb   *Table3 `json:"tb3" ref:"left;tb=id"`
+	Tb   *Table3 `json:"tb3" ref:"left;ref=id"`
 }
 
 type Table3 struct {
@@ -38,8 +38,8 @@ func init() {
 	// 使用之前需要完成表定义
 	// 定义表关联
 	// mysql mariadb sqlserver postgres opengauss sqllite oracle
-	// mysql
-	ref = NewReference(dbtype.MySQL)
+	// mysql mariadb sqlserver postgres opengauss sqllite oracle
+	ref = NewReference(dbtype.SQLServer)
 	// 添加表定义
 	ref.AddTableDef("table1", Table1{})
 	ref.AddTableDef("table2", Table2{})
@@ -75,4 +75,20 @@ func TestORM2(t *testing.T) {
 	if err != nil {
 		fmt.Println(err.Error())
 	}
+}
+
+func TestORM3(t *testing.T) {
+	var db *sql.DB = &sql.DB{}
+	orm := NewORM(context.Background(), "table1", db, ref)
+
+	orm.Wheres(Where{
+		"id__gt":           0,      // table1的id > 1
+		"name__startswith": "test", // table1的name like 'test%'
+		// tb2：table1的tag字段（可以理解为table2的别名），tb3：table2的tag字段（可以理解为table3的别名）
+		// 含义：select * from table1 left join table2 left join table3 where table3.id > 1
+		"tb2.tb3.id__gt": 1,
+		"dt__date":       "2023-01-01",
+	})
+	orm.Page(1, 10)
+	fmt.Println(orm.ToSQL(false))
 }

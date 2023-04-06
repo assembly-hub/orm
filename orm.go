@@ -30,6 +30,12 @@ func init() {
 	notReadyLastInsertIDSet.Add(dbtype.SQLServer, dbtype.Postgres, dbtype.OpenGauss)
 }
 
+// InitNotReadyLastInsertID 初始化方法 LastInsertID 没有实现的数据库类型，会覆盖默认设置
+func InitNotReadyLastInsertID(db ...int) {
+	notReadyLastInsertIDSet.Clear()
+	notReadyLastInsertIDSet.Add(db...)
+}
+
 type databaseQuery struct {
 	Distinct        bool
 	SelectForUpdate bool
