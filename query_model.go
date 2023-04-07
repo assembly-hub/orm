@@ -260,18 +260,18 @@ func (p *queryModel) formatSQLValue(colOperator, colName string, colData interfa
 			panic(ErrBetweenValueMatch)
 		}
 
-		rawVal = strings.ReplaceAll(colData, "'", p.DBCore.StrEsc+"'")
-		val = p.DBCore.EscStart + rawVal + p.DBCore.EscEnd
+		rawVal = strings.ReplaceAll(colData, "'", "''")
+		val = "'" + rawVal + "'"
 	case []string:
 		if colOperator == "between" {
 			if len(colData) != 2 {
 				panic(ErrBetweenValueMatch)
 			}
-			val = strings.ReplaceAll(colData[0], "'", p.DBCore.StrEsc+"'") + " and " +
-				strings.ReplaceAll(colData[1], "'", p.DBCore.StrEsc+"'")
+			val = "'" + strings.ReplaceAll(colData[0], "'", "''") + "' and '" +
+				strings.ReplaceAll(colData[1], "'", "''") + "'"
 		} else {
 			for _, v := range colData {
-				v = strings.ReplaceAll(v, "'", p.DBCore.StrEsc+"'")
+				v = strings.ReplaceAll(v, "'", "''")
 				rawStrArr = append(rawStrArr, v)
 			}
 			val = "(" + connectStrArr(rawStrArr, ",", "'", "'") + ")"
@@ -281,12 +281,12 @@ func (p *queryModel) formatSQLValue(colOperator, colName string, colData interfa
 			if len(colData) != 2 {
 				panic(ErrBetweenValueMatch)
 			}
-			val = strings.ReplaceAll(fmt.Sprintf("%v", colData[0]), "'", p.DBCore.StrEsc+"'") + " and " +
-				strings.ReplaceAll(fmt.Sprintf("%v", colData[1]), "'", p.DBCore.StrEsc+"'")
+			val = "'" + strings.ReplaceAll(fmt.Sprintf("%v", colData[0]), "'", "''") + "' and '" +
+				strings.ReplaceAll(fmt.Sprintf("%v", colData[1]), "'", "''") + "'"
 		} else {
 			for _, vv := range colData {
 				v := fmt.Sprintf("%v", vv)
-				v = strings.ReplaceAll(v, "'", p.DBCore.StrEsc+"'")
+				v = strings.ReplaceAll(v, "'", "''")
 				rawStrArr = append(rawStrArr, v)
 			}
 			val = "(" + connectStrArr(rawStrArr, ",", "'", "'") + ")"
@@ -336,8 +336,8 @@ func (p *queryModel) formatSQLValue(colOperator, colName string, colData interfa
 			panic(ErrBetweenValueMatch)
 		}
 
-		rawVal = strings.ReplaceAll(fmt.Sprintf("%v", colData), "'", p.DBCore.StrEsc+"'")
-		val = p.DBCore.EscStart + rawVal + p.DBCore.EscEnd
+		rawVal = strings.ReplaceAll(fmt.Sprintf("%v", colData), "'", "''")
+		val = "'" + rawVal + "'"
 	}
 
 	return

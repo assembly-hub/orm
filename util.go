@@ -397,9 +397,9 @@ func count(ctx context.Context, db *DB, tx *Tx, q *BaseQuery) (int64, error) {
 	var rows *sql.Rows
 	var err error
 	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
+		rows, err = tx.QueryContext(ctx, q.Count())
 	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
+		rows, err = db.QueryContext(ctx, q.Count())
 	} else {
 		return 0, ErrClient
 	}

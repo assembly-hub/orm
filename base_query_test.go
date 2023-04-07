@@ -192,7 +192,7 @@ func TestBaseGetData2(t *testing.T) {
 	fmt.Println(s)
 }
 
-func TestMySqlOrmConf2(t *testing.T) {
+func TestMySQLOrmConf2(t *testing.T) {
 	ref := NewReference(dbtype.MySQL)
 	ref.AddTableDef("table1", Table1{})
 	ref.AddTableDef("table2", Table2{})
@@ -253,7 +253,7 @@ func TestMySQLOrmConf3(t *testing.T) {
 	fmt.Println(s)
 }
 
-func TestMySqlOrmConf31(t *testing.T) {
+func TestMySQLOrmConf31(t *testing.T) {
 	ref := NewReference(dbtype.MySQL)
 	ref.AddTableDef("table1", Def{})
 	ref.AddTableDef("table2", Def2{})

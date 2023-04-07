@@ -290,12 +290,12 @@ func (orm *ORM) oracleInsertManySQL(dataList []interface{}, cols []string) (stri
 		return "", fmt.Errorf("insert data is empty")
 	}
 
-	dataSql := ""
+	dataSQL := ""
 	for i := 0; i < len(valArr)-1; i++ {
-		dataSql += fmt.Sprintf(" into %s VALUES(%s)", tableAndField, valArr[i])
+		dataSQL += fmt.Sprintf(" into %s VALUES(%s)", tableAndField, valArr[i])
 	}
 
-	insertSQL += dataSql + " select " + valArr[len(valArr)-1] + " from \"DUAL\""
+	insertSQL += dataSQL + " select " + valArr[len(valArr)-1] + " from \"DUAL\""
 	return insertSQL, nil
 }
 
@@ -345,7 +345,7 @@ func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
 			cols = append(cols, formatKey)
 			colSet.Add(k)
 			values = append(values, fmt.Sprintf("%s as %s", val, formatKey))
-			rawVal = append(rawVal, fmt.Sprintf("%s", val))
+			rawVal = append(rawVal, val)
 		}
 	default:
 		dataValue := reflect.ValueOf(data)
@@ -379,7 +379,7 @@ func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
 			cols = append(cols, formatKey)
 			colSet.Add(colName)
 			values = append(values, fmt.Sprintf("%s as %s", val, formatKey))
-			rawVal = append(rawVal, fmt.Sprintf("%s", val))
+			rawVal = append(rawVal, val)
 		}
 	}
 	if len(cols) <= 0 || len(values) <= 0 {
