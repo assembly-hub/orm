@@ -699,12 +699,17 @@ func (orm *ORM) InsertManySameClos(data []interface{}, cols []string, batchSize 
 		batchSize = defaultBatchSize
 	}
 
-	dataArr := util.ArrSplit(data, batchSize)
+	// dataArr := util.ArrSplit(data, batchSize)
 
 	var sqlArr []string
 
-	for _, d := range dataArr {
-		insertSQL, err := orm.formatInsertManySQL(d, cols)
+	dataLen := len(data)
+	for i := 0; i < dataLen; i += batchSize {
+		ends := i + batchSize
+		if ends > dataLen {
+			ends = dataLen
+		}
+		insertSQL, err := orm.formatInsertManySQL(data[i:ends], cols)
 		if err != nil {
 			return 0, err
 		}
