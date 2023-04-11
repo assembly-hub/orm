@@ -341,7 +341,13 @@ func (orm *ORM) innerInsertSQL(data interface{}) (string, error) {
 
 func (orm *ORM) innerInsertManySQL(dataList []interface{}, cols []string) (string, error) {
 	dbCore := orm.ref.getDBConf()
-	insertSQL := "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values%s"
+
+	var insertSQL strings.Builder
+	insertSQL.WriteString("insert into ")
+	insertSQL.WriteString(dbCore.EscStart)
+	insertSQL.WriteString(orm.tableName)
+	insertSQL.WriteString(dbCore.EscEnd)
+	// insertSQL := "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values%s"
 
 	if len(dataList) <= 0 {
 		return "", fmt.Errorf("insert data is nil")
@@ -349,7 +355,7 @@ func (orm *ORM) innerInsertManySQL(dataList []interface{}, cols []string) (strin
 
 	typeErrStr := "type of insert data is []map[string]interface{} or []*struct or []struct"
 
-	var valArr []string
+	valArr := make([]string, 0, len(dataList))
 	for _, data := range dataList {
 		var valMap map[string]interface{}
 		switch data := data.(type) {
@@ -385,24 +391,28 @@ func (orm *ORM) innerInsertManySQL(dataList []interface{}, cols []string) (strin
 			return "", fmt.Errorf("sql data is empty, please check it")
 		}
 
-		subVal := "("
+		var subVal strings.Builder
+		subVal.Grow(len(cols) * 10)
+		subVal.WriteByte('(')
 		for _, colName := range cols {
 			if v, ok := valMap[colName]; ok {
 				val, timeEmpty := orm.formatValue(v)
 				if (colName == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
-					subVal += "null,"
+					subVal.WriteString("null,")
 					continue
 				}
 
-				subVal += val + ","
+				subVal.WriteString(val)
+				subVal.WriteByte(',')
 			} else if v, ok = valMap["#"+colName]; ok {
-				subVal += fmt.Sprintf("%v,", v)
+				subVal.WriteString(fmt.Sprintf("%v,", v))
 			} else {
-				subVal += "null,"
+				subVal.WriteString("null,")
 			}
 		}
-		subVal = subVal[:len(subVal)-1] + ")"
-		valArr = append(valArr, subVal)
+		s := []byte(subVal.String())
+		s[len(s)-1] = ')'
+		valArr = append(valArr, string(s))
 	}
 
 	if len(valArr) <= 0 {
@@ -417,8 +427,12 @@ func (orm *ORM) innerInsertManySQL(dataList []interface{}, cols []string) (strin
 		}
 		newCols = append(newCols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
 	}
-	insertSQL = fmt.Sprintf(insertSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(valArr, ","))
-	return insertSQL, nil
+	insertSQL.WriteByte('(')
+	insertSQL.WriteString(util.JoinArr(newCols, ","))
+	insertSQL.WriteString(") values")
+	insertSQL.WriteString(util.JoinArr(valArr, ","))
+	// insertSQL = fmt.Sprintf(insertSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(valArr, ","))
+	return insertSQL.String(), nil
 }
 
 func (orm *ORM) innerUpdateSQL(data interface{}) (string, error) {
