@@ -11,6 +11,7 @@ import (
 
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
+	"github.com/assembly-hub/task/execute"
 
 	"github.com/assembly-hub/orm/dbtype"
 )
@@ -701,20 +702,26 @@ func (orm *ORM) InsertManySameClos(data []interface{}, cols []string, batchSize 
 
 	// dataArr := util.ArrSplit(data, batchSize)
 
-	var sqlArr []string
-
 	dataLen := len(data)
+	sqlTask := execute.NewExecutor("insert sql task")
 	for i := 0; i < dataLen; i += batchSize {
 		ends := i + batchSize
 		if ends > dataLen {
 			ends = dataLen
 		}
-		insertSQL, err := orm.formatInsertManySQL(data[i:ends], cols)
-		if err != nil {
-			return 0, err
-		}
 
-		sqlArr = append(sqlArr, insertSQL)
+		sqlTask.AddSimpleTask(orm.formatInsertManySQL, data[i:ends], cols)
+	}
+
+	sqlArr, taskErrList, err := sqlTask.ExecuteTaskWithErr()
+	if err != nil {
+		return 0, err
+	}
+
+	for _, e := range taskErrList {
+		if e != nil {
+			return 0, e
+		}
 	}
 
 	if trans && orm.db != nil {
@@ -730,7 +737,7 @@ func (orm *ORM) InsertManySameClos(data []interface{}, cols []string, batchSize 
 		}()
 
 		for _, sqlObj := range sqlArr {
-			execContext, err := tx.ExecContext(orm.ctx, sqlObj)
+			execContext, err := tx.ExecContext(orm.ctx, sqlObj.(string))
 			if err != nil {
 				panic(err)
 			}
@@ -753,9 +760,9 @@ func (orm *ORM) InsertManySameClos(data []interface{}, cols []string, batchSize 
 		var execContext sql.Result
 		for _, sqlObj := range sqlArr {
 			if orm.tx != nil {
-				execContext, err = orm.tx.ExecContext(orm.ctx, sqlObj)
+				execContext, err = orm.tx.ExecContext(orm.ctx, sqlObj.(string))
 			} else if orm.db != nil {
-				execContext, err = orm.db.ExecContext(orm.ctx, sqlObj)
+				execContext, err = orm.db.ExecContext(orm.ctx, sqlObj.(string))
 			} else {
 				return 0, ErrClient
 			}
