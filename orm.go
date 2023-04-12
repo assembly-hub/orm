@@ -18,6 +18,7 @@ const (
 	selectColLinkStr  = "__"
 	defaultPrimaryKey = "id"
 	defaultBatchSize  = 200
+	defaultLimitMax   = 5000
 )
 
 var (
@@ -90,6 +91,9 @@ type ORM struct {
 	// 保留上次查询参数
 	keepQuery bool
 
+	// 默认limit
+	limit uint
+
 	// 查询配置数据
 	Q *databaseQuery
 }
@@ -154,7 +158,14 @@ func initORM() *ORM {
 	dao.selectColLinkStr = "_"
 	dao.Q = newDBQuery()
 	dao.primaryKey = defaultPrimaryKey
+	dao.limit = defaultLimitMax
 	return dao
+}
+
+// SetDefLimit 修改默认limit
+func (orm *ORM) SetDefLimit(n uint) *ORM {
+	orm.limit = n
+	return orm
 }
 
 // SQLServerExcludePK sql server 排除主键
@@ -496,6 +507,9 @@ func (orm *ORM) ToData(result interface{}, flat bool) (err error) {
 		Select:           orm.Q.Select,
 		GroupBy:          orm.Q.GroupBy,
 		Having:           orm.Q.Having,
+	}
+	if len(q.Limit) <= 0 {
+		q.Limit = []uint{orm.limit}
 	}
 	if !flat {
 		q.SelectColLinkStr = selectColLinkStr

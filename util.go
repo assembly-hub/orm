@@ -14,6 +14,7 @@ import (
 
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
+	"github.com/assembly-hub/task/execute"
 )
 
 const (
@@ -30,7 +31,10 @@ const (
 	jsonOther = structJSONType(3)
 )
 
-const defCacheSize = 50
+const (
+	defCacheSize  = 50
+	scanBatchSize = 100
+)
 
 func time2Str(t interface{}) string {
 	switch t := t.(type) {
@@ -93,7 +97,7 @@ func formatMap(mapValue map[string]interface{}, selectColLinkStr string) {
 				}
 
 				if _, ok := tempMap[subKey]; !ok {
-					m := map[string]interface{}{}
+					m := make(map[string]interface{})
 					tempMap[subKey] = m
 					tempMap = m
 				} else {
@@ -188,7 +192,7 @@ func scanMapList(rows *sql.Rows, flat bool, colLinkStr string, cacheLen int) (re
 			return nil, err
 		}
 
-		m := map[string]interface{}{}
+		m := make(map[string]interface{})
 		scanIntoMap(m, row, cols)
 		if len(m) > 0 && !flat {
 			formatMap(m, colLinkStr)
@@ -313,7 +317,7 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interf
 			(elemType.Kind() == reflect.Ptr && elemType.Elem().Kind() == reflect.Map &&
 				elemType.Elem().Elem().Kind() == reflect.Interface) {
 			dataValue.Set(reflect.ValueOf(ret))
-			return err
+			return nil
 		}
 
 		err = util.Interface2Interface(ret, result)
@@ -340,10 +344,31 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interf
 		}
 
 		elemList := reflect.MakeSlice(reflect.SliceOf(elemType), len(ret), len(ret))
+		scanTask := execute.NewExecutor("scan list")
+		dataLen := len(ret)
+		for starts := 0; starts < dataLen; starts += scanBatchSize {
+			ends := starts + scanBatchSize
+			if ends > dataLen {
+				ends = dataLen
+			}
+			scanTask.AddSimpleTask(func(s, e int) (any, error) {
+				for i := s; i < e; i++ {
+					v := elemList.Index(i)
+					setDataFunc(&v, ret[i][mapKey])
+				}
+				return nil, nil
+			}, starts, ends)
+		}
 
-		for i := range ret {
-			v := elemList.Index(i)
-			setDataFunc(&v, ret[i][mapKey])
+		_, taskErr, err := scanTask.ExecuteTaskWithErr()
+		if err != nil {
+			return err
+		}
+
+		for i := range taskErr {
+			if taskErr[i] != nil {
+				return taskErr[i]
+			}
 		}
 
 		dataValue.Set(elemList)
@@ -453,7 +478,7 @@ func TransSession(ctx context.Context, db *DB, f func(ctx context.Context, tx *T
 }
 
 func structJSONField(dataType reflect.Type) (map[string]interface{}, error) {
-	structMap := map[string]interface{}{}
+	structMap := make(map[string]interface{})
 	return structJSONKey(dataType, structMap)
 }
 
