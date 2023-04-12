@@ -13,33 +13,6 @@ const (
 	defaultAliasPrefix = "orm_"
 )
 
-// where 条件 支持子查询 BaseQuery or *BaseQuery
-// bin含义：区分文本大小
-// = : "key": "val" or "key__eq": "val" or "key__bin_eq": "val"
-// < : "key__lt": 1 or "key__bin_lt": 1
-// <= : "key__lte": 1 or "key__bin_lte": 1
-// > : "key__gt": 1 or "key__bin_gt": 1
-// >= : "key__gte": 1 or "key__bin_gte": 1
-// != : "key__ne": 1 or "key__bin_ne": 1
-// in : "key__in": [1] or "key__bin_in": [1]
-// not in : "key__nin": [1] or "key__bin_nin": [1]
-// date : "key__date": "2022-01-01"
-// between : "key__between": [1, 2]
-
-// 以下不支持子查询
-// is null : "key__null": true
-// is not null : "key__null": false
-// $or : map[string]interface{} or []map[string]interface{}
-// $and : map[string]interface{} or []map[string]interface{}
-// and_like :
-//		"key__startswith": "123"
-//		"key__endswith": "123"
-//		"key__contains": "123" or ["123", "123"]
-// or_like :
-//		"key__or_startswith": "123" or ["123", "123"]
-//		"key__or_endswith": "123" or ["123", "123"]
-//		"key__or_contains": "123" or ["123", "123"]
-
 // BaseQuery
 // # 为内置符号，标志为原始字段，不进行任何处理，仅在以下数据有效：
 // Select Order GroupBy Where Having
@@ -78,7 +51,15 @@ func (q *BaseQuery) addTag(tag string) {
 }
 
 func (q *BaseQuery) addRef(level int, ref *referenceData) {
-	key := fmt.Sprintf("%s-%s", ref.FromTable, util.JoinArr(ref.tagList, "_"))
+	linkStr := util.JoinArr(ref.tagList, "_")
+
+	var keyBuf strings.Builder
+	keyBuf.Grow(len(ref.FromTable) + 1 + len(linkStr))
+	keyBuf.WriteString(ref.FromTable)
+	keyBuf.WriteByte('-')
+	keyBuf.WriteString(linkStr)
+
+	key := keyBuf.String()
 	if q.joinSet.Has(key) {
 		return
 	}
@@ -103,6 +84,8 @@ func (q *BaseQuery) formatColumn(sel string) *formatColumnData {
 	tagTable := q.TableName
 	col := sel
 
+	var strBuf strings.Builder
+
 	// 检查跨表字段
 	colArr := strings.Split(sel, ".")
 	tagJoinStr := ""
@@ -125,11 +108,22 @@ func (q *BaseQuery) formatColumn(sel string) *formatColumnData {
 
 			newRef.tagList = colArr[:level+1]
 			if level >= 0 {
-				newRef.toAlias = fmt.Sprintf("%s%s%s%s", dbCore.EscStart, defaultAliasPrefix,
-					util.JoinArr(colArr[:level+1], "_"), dbCore.EscEnd)
+				strBuf.Reset()
+				strBuf.Grow(50)
+				strBuf.WriteString(dbCore.EscStart)
+				strBuf.WriteString(defaultAliasPrefix)
+				strBuf.WriteString(util.JoinArr(colArr[:level+1], "_"))
+				strBuf.WriteString(dbCore.EscEnd)
+
+				newRef.toAlias = strBuf.String()
 				if level >= 1 {
-					newRef.fromAlias = fmt.Sprintf("%s%s%s%s", dbCore.EscStart, defaultAliasPrefix,
-						util.JoinArr(colArr[:level], "_"), dbCore.EscEnd)
+					strBuf.Reset()
+					strBuf.Grow(50)
+					strBuf.WriteString(dbCore.EscStart)
+					strBuf.WriteString(defaultAliasPrefix)
+					strBuf.WriteString(util.JoinArr(colArr[:level], "_"))
+					strBuf.WriteString(dbCore.EscEnd)
+					newRef.fromAlias = strBuf.String()
 				}
 			}
 
@@ -138,7 +132,13 @@ func (q *BaseQuery) formatColumn(sel string) *formatColumnData {
 
 			q.addRef(level, newRef)
 		}
-		tagJoinStr = fmt.Sprintf("%s%s", defaultAliasPrefix, util.JoinArr(colArr[:len(colArr)-1], "_"))
+
+		strBuf.Reset()
+		strBuf.Grow(50)
+		strBuf.WriteString(defaultAliasPrefix)
+		strBuf.WriteString(util.JoinArr(colArr[:len(colArr)-1], "_"))
+
+		tagJoinStr = strBuf.String()
 		col = colArr[len(colArr)-1]
 	}
 
@@ -176,19 +176,30 @@ func (q *BaseQuery) formatColumn(sel string) *formatColumnData {
 		colData.FuncName = action
 		colData.Alias = col[j+1:]
 
-		colData.FormatCol = fmt.Sprintf("%s(%s%s%s.%s%s%s)%s", action,
-			dbCore.EscStart, tagTable, dbCore.EscEnd,
-			dbCore.EscStart, colData.TableCol, dbCore.EscEnd, colData.Alias)
+		strBuf.Reset()
+		strBuf.Grow(100)
+		strBuf.WriteString(action)
+		strBuf.WriteByte('(')
+		strBuf.WriteString(dbCore.EscStart)
+		strBuf.WriteString(tagTable)
+		strBuf.WriteString(dbCore.EscEnd)
+		strBuf.WriteByte('.')
+
 		if colData.TableCol == "*" {
-			colData.FormatCol = fmt.Sprintf("%s(%s%s%s.%s)%s", action,
-				dbCore.EscStart, tagTable, dbCore.EscEnd,
-				colData.TableCol, colData.Alias)
+			strBuf.WriteString(colData.TableCol)
 		} else {
 			err := globalVerifyObj.VerifyFieldName(colData.TableCol)
 			if err != nil {
 				panic(err)
 			}
+
+			strBuf.WriteString(dbCore.EscStart)
+			strBuf.WriteString(colData.TableCol)
+			strBuf.WriteString(dbCore.EscEnd)
 		}
+		strBuf.WriteByte(')')
+		strBuf.WriteString(colData.Alias)
+		colData.FormatCol = strBuf.String()
 		return colData
 	}
 
@@ -196,9 +207,13 @@ func (q *BaseQuery) formatColumn(sel string) *formatColumnData {
 	colData.Alias = ""
 	i = strings.Index(col, " ")
 	colData.TableCol = col
-	colData.FormatCol = fmt.Sprintf("%s%s%s.%s%s%s",
-		dbCore.EscStart, tagTable, dbCore.EscEnd,
-		dbCore.EscStart, col, dbCore.EscEnd)
+
+	strBuf.Reset()
+	strBuf.Grow(100)
+	strBuf.WriteString(dbCore.EscStart)
+	strBuf.WriteString(tagTable)
+	strBuf.WriteString(dbCore.EscEnd)
+	strBuf.WriteByte('.')
 	if i > 0 {
 		colData.TableCol = col[:i]
 		err := globalVerifyObj.VerifyFieldName(colData.TableCol)
@@ -207,17 +222,21 @@ func (q *BaseQuery) formatColumn(sel string) *formatColumnData {
 		}
 
 		colData.Alias = col[i+1:]
-		colData.FormatCol = fmt.Sprintf("%s%s%s.%s%s%s %s",
-			dbCore.EscStart, tagTable, dbCore.EscEnd,
-			dbCore.EscStart, colData.TableCol, dbCore.EscEnd,
-			colData.Alias)
+
+		strBuf.WriteString(dbCore.EscStart)
+		strBuf.WriteString(colData.TableCol)
+		strBuf.WriteString(dbCore.EscEnd)
+		strBuf.WriteByte(' ')
+		strBuf.WriteString(colData.Alias)
 	} else if col == "*" {
 		colData.TableCol = col
-		colData.FormatCol = fmt.Sprintf("%s%s%s.%s",
-			dbCore.EscStart, tagTable, dbCore.EscEnd,
-			colData.TableCol)
+		strBuf.WriteString(colData.TableCol)
+	} else {
+		strBuf.WriteString(dbCore.EscStart)
+		strBuf.WriteString(col)
+		strBuf.WriteString(dbCore.EscEnd)
 	}
-
+	colData.FormatCol = strBuf.String()
 	return colData
 }
 
@@ -302,6 +321,8 @@ func (q *BaseQuery) aliasSelectData() []*selectModel {
 
 	selObj := &selectModel{}
 
+	var strBuf strings.Builder
+
 	for _, sel := range q.Select {
 		if sel[0] == '#' {
 			selObj.Cols = append(selObj.Cols, sel[1:])
@@ -313,18 +334,39 @@ func (q *BaseQuery) aliasSelectData() []*selectModel {
 				selObj.Cols = append(selObj.Cols, colData.FormatCol)
 			} else if colData.FuncName != "" {
 				txt := colData.TableCol
+
+				strBuf.Reset()
+				strBuf.Grow(100)
+
 				if len(colData.TagList) <= 0 {
 					if colData.TableCol == "*" {
 						txt = colData.TableAlias
 					}
-					selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s as %s%s%s%s%s", colData.FormatCol,
-						dbCore.EscStart, txt, linkStr, colData.FuncName, dbCore.EscEnd))
+
+					strBuf.WriteString(colData.FormatCol)
+					strBuf.WriteString(" as ")
+					strBuf.WriteString(dbCore.EscStart)
+					strBuf.WriteString(txt)
+					strBuf.WriteString(linkStr)
+					strBuf.WriteString(colData.FuncName)
+					strBuf.WriteString(dbCore.EscEnd)
+
+					selObj.Cols = append(selObj.Cols, strBuf.String())
 				} else {
 					if colData.TableCol == "*" {
 						txt = linkStr
 					} else {
 						txt = linkStr + txt + linkStr
 					}
+
+					strBuf.WriteString(colData.FormatCol)
+					strBuf.WriteString(" as ")
+					strBuf.WriteString(dbCore.EscStart)
+					strBuf.WriteString(tagLabel)
+					strBuf.WriteString(txt)
+					strBuf.WriteString(colData.FuncName)
+					strBuf.WriteString(dbCore.EscEnd)
+
 					selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s as %s%s%s%s%s", colData.FormatCol,
 						dbCore.EscStart, tagLabel, txt, colData.FuncName, dbCore.EscEnd))
 				}
@@ -336,16 +378,37 @@ func (q *BaseQuery) aliasSelectData() []*selectModel {
 					if len(cols) > 0 {
 						if len(colData.TagList) <= 0 {
 							for _, col := range cols {
-								selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s%s%s.%s%s%s",
-									dbCore.EscStart, colData.TableAlias, dbCore.EscEnd,
-									dbCore.EscStart, col, dbCore.EscEnd))
+								strBuf.Reset()
+								strBuf.Grow(100)
+								strBuf.WriteString(dbCore.EscStart)
+								strBuf.WriteString(colData.TableAlias)
+								strBuf.WriteString(dbCore.EscEnd)
+								strBuf.WriteByte('.')
+								strBuf.WriteString(dbCore.EscStart)
+								strBuf.WriteString(col)
+								strBuf.WriteString(dbCore.EscEnd)
+
+								selObj.Cols = append(selObj.Cols, strBuf.String())
 							}
 						} else {
 							for _, col := range cols {
-								selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s%s%s.%s%s%s as %s%s%s%s%s",
-									dbCore.EscStart, colData.TableAlias, dbCore.EscEnd,
-									dbCore.EscStart, col, dbCore.EscEnd,
-									dbCore.EscStart, tagLabel, linkStr, col, dbCore.EscEnd))
+								strBuf.Reset()
+								strBuf.Grow(100)
+								strBuf.WriteString(dbCore.EscStart)
+								strBuf.WriteString(colData.TableAlias)
+								strBuf.WriteString(dbCore.EscEnd)
+								strBuf.WriteByte('.')
+								strBuf.WriteString(dbCore.EscStart)
+								strBuf.WriteString(col)
+								strBuf.WriteString(dbCore.EscEnd)
+								strBuf.WriteString(" as ")
+								strBuf.WriteString(dbCore.EscStart)
+								strBuf.WriteString(tagLabel)
+								strBuf.WriteString(linkStr)
+								strBuf.WriteString(col)
+								strBuf.WriteString(dbCore.EscEnd)
+
+								selObj.Cols = append(selObj.Cols, strBuf.String())
 							}
 						}
 					} else {
@@ -356,8 +419,17 @@ func (q *BaseQuery) aliasSelectData() []*selectModel {
 				if len(colData.TagList) <= 0 {
 					selObj.Cols = append(selObj.Cols, colData.FormatCol)
 				} else {
-					selObj.Cols = append(selObj.Cols, fmt.Sprintf("%s as %s%s%s%s%s", colData.FormatCol,
-						dbCore.EscStart, tagLabel, linkStr, colData.TableCol, dbCore.EscEnd))
+					strBuf.Reset()
+					strBuf.Grow(100)
+					strBuf.WriteString(colData.FormatCol)
+					strBuf.WriteString(" as ")
+					strBuf.WriteString(dbCore.EscStart)
+					strBuf.WriteString(tagLabel)
+					strBuf.WriteString(linkStr)
+					strBuf.WriteString(colData.TableCol)
+					strBuf.WriteString(dbCore.EscEnd)
+
+					selObj.Cols = append(selObj.Cols, strBuf.String())
 				}
 			}
 		}
@@ -438,6 +510,7 @@ func (q *BaseQuery) groupData() []string {
 
 func (q *BaseQuery) formatCond(where map[string]interface{}) map[string]interface{} {
 	newCond := map[string]interface{}{}
+	var strBuf strings.Builder
 	for k, v := range where {
 		not := ""
 		if k[:1] == "~" {
@@ -485,7 +558,13 @@ func (q *BaseQuery) formatCond(where map[string]interface{}) map[string]interfac
 				newCond[not+colData.FormatCol] = val
 			} else {
 				colData := q.formatColumn(arr[0])
-				newCond[not+fmt.Sprintf("%s__%s", colData.FormatCol, arr[1])] = val
+				strBuf.Reset()
+				strBuf.Grow(50)
+				strBuf.WriteString(not)
+				strBuf.WriteString(colData.FormatCol)
+				strBuf.WriteString("__")
+				strBuf.WriteString(arr[1])
+				newCond[strBuf.String()] = val
 			}
 		}
 	}

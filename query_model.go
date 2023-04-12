@@ -48,32 +48,39 @@ type queryModel struct {
 }
 
 func (p *queryModel) selectSQL() string {
-	sql := ""
+	var sqlBuff strings.Builder
+	sqlBuff.Grow(200)
 	for _, sel := range p.Select {
 		for _, col := range sel.Cols {
 			if sel.Table != "" {
 				col = sel.Table + "." + col
 			}
-			if sql == "" {
-				sql = col
+			if sqlBuff.Len() <= 0 {
+				sqlBuff.WriteString(col)
 			} else {
-				sql += "," + col
+				sqlBuff.WriteByte(',')
+				sqlBuff.WriteString(col)
 			}
 		}
 	}
 
-	if sql == "" {
-		sql = "*"
+	if sqlBuff.Len() <= 0 {
+		sqlBuff.WriteByte('*')
 	}
 
 	if p.Distinct {
-		sql = "distinct " + sql
+		sql := sqlBuff.String()
+		sqlBuff.Reset()
+		sqlBuff.Grow(len(sql) + 9)
+		sqlBuff.WriteString("distinct ")
+		sqlBuff.WriteString(sql)
 	}
-	return sql
+	return sqlBuff.String()
 }
 
 func (p *queryModel) joinSQL() string {
-	sql := ""
+	var sqlBuff, whereBuff strings.Builder
+	sqlBuff.Grow(150)
 	for _, join := range p.JoinList {
 		joinStr := ""
 		if join.Type.value() != "" {
@@ -81,15 +88,29 @@ func (p *queryModel) joinSQL() string {
 		}
 		if join.JoinAlias != "" {
 			if p.DBCore.DBType == dbtype.Oracle {
-				sql += " " + joinStr + "join " + join.JoinTable + " " + join.JoinAlias
+				sqlBuff.WriteByte(' ')
+				sqlBuff.WriteString(joinStr)
+				sqlBuff.WriteString("join ")
+				sqlBuff.WriteString(join.JoinTable)
+				sqlBuff.WriteByte(' ')
+				sqlBuff.WriteString(join.JoinAlias)
 			} else {
-				sql += " " + joinStr + "join " + join.JoinTable + " as " + join.JoinAlias
+				sqlBuff.WriteByte(' ')
+				sqlBuff.WriteString(joinStr)
+				sqlBuff.WriteString("join ")
+				sqlBuff.WriteString(join.JoinTable)
+				sqlBuff.WriteString(" as ")
+				sqlBuff.WriteString(join.JoinAlias)
 			}
 		} else {
-			sql += " " + joinStr + "join " + join.JoinTable
+			sqlBuff.WriteByte(' ')
+			sqlBuff.WriteString(joinStr)
+			sqlBuff.WriteString("join ")
+			sqlBuff.WriteString(join.JoinTable)
 		}
 
-		where := ""
+		whereBuff.Reset()
+		whereBuff.Grow(50)
 		mt := join.MainTable
 		if join.MainAlias != "" {
 			mt = join.MainAlias
@@ -99,22 +120,30 @@ func (p *queryModel) joinSQL() string {
 			jt = join.JoinAlias
 		}
 		for _, sel := range join.On {
-			if where == "" {
-				where = mt + "." + sel[0] + "=" + jt + "." + sel[1]
-			} else {
-				where += " and " + mt + "." + sel[0] + "=" + jt + "." + sel[1]
+			if whereBuff.Len() > 0 {
+				whereBuff.WriteString(" and ")
 			}
+
+			whereBuff.WriteString(mt)
+			whereBuff.WriteByte('.')
+			whereBuff.WriteString(sel[0])
+			whereBuff.WriteByte('=')
+			whereBuff.WriteString(jt)
+			whereBuff.WriteByte('.')
+			whereBuff.WriteString(sel[1])
 		}
-		if where != "" {
-			sql += " on " + where
+		if whereBuff.Len() > 0 {
+			sqlBuff.WriteString(" on ")
+			sqlBuff.WriteString(whereBuff.String())
 		}
 	}
 
-	return sql
+	return sqlBuff.String()
 }
 
 func (p *queryModel) orderSQL() string {
-	sql := ""
+	var sql strings.Builder
+	sql.Grow(50)
 	for _, sel := range p.Order {
 		for _, col := range sel.Cols {
 			if col[0] == '-' {
@@ -128,15 +157,15 @@ func (p *queryModel) orderSQL() string {
 			if sel.Table != "" {
 				col = sel.Table + "." + col
 			}
-			if sql == "" {
-				sql = col
-			} else {
-				sql += "," + col
+			if sql.Len() > 0 {
+				sql.WriteByte(',')
 			}
+
+			sql.WriteString(col)
 		}
 	}
 
-	return sql
+	return sql.String()
 }
 
 func (p *queryModel) orSQL(where map[string]interface{}) string {

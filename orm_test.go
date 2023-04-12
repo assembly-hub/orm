@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/assembly-hub/orm/dbtype"
 )
@@ -39,7 +40,7 @@ func init() {
 	// 定义表关联
 	// mysql mariadb sqlserver postgres opengauss sqllite oracle
 	// mysql mariadb sqlserver postgres opengauss sqllite oracle
-	ref = NewReference(dbtype.SQLServer)
+	ref = NewReference(dbtype.MySQL)
 	// 添加表定义
 	ref.AddTableDef("table1", Table1{})
 	ref.AddTableDef("table2", Table2{})
@@ -90,5 +91,12 @@ func TestORM3(t *testing.T) {
 		"dt__date":       "2023-01-01",
 	})
 	orm.Page(1, 10)
+	t1 := time.Now()
+	c := 1000000
+	for i := 0; i < c; i++ {
+		orm.ToSQL(false)
+	}
+	t2 := time.Now()
+	fmt.Println(float64(t2.UnixMicro()-t1.UnixMicro()) / float64(c))
 	fmt.Println(orm.ToSQL(false))
 }

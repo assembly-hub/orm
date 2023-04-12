@@ -619,14 +619,17 @@ func Struct2Map(raw interface{}, excludeKey ...string) map[string]interface{} {
 }
 
 func connectStrArr(arr []string, linkStr string, start, end string) string {
-	s := ""
+	var s strings.Builder
+	s.Grow(len(arr) * (len(linkStr) + len(start) + len(end) + 10))
 	for _, v := range arr {
-		if s == "" {
-			s = start + v + end
-		} else {
-			s += linkStr + start + v + end
+		if s.Len() > 0 {
+			s.WriteString(linkStr)
 		}
+
+		s.WriteString(start)
+		s.WriteString(v)
+		s.WriteString(end)
 	}
 
-	return s
+	return s.String()
 }

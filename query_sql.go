@@ -12,83 +12,130 @@ import (
 )
 
 func innerDateTime(s string, op string) string {
+	var strBuff strings.Builder
+	strBuff.Grow(2 + len(s))
+	strBuff.WriteByte('\'')
 	if op == "date" {
-		return fmt.Sprintf("'%s'", strings.Split(s, " ")[0])
+		strBuff.WriteString(strings.Split(s, " ")[0])
+	} else {
+		strBuff.WriteString(s)
 	}
-	return fmt.Sprintf("'%s'", s)
+	strBuff.WriteByte('\'')
+	return strBuff.String()
 }
 
 // query
 func (p *queryModel) countDB() string {
-	sql := "select "
+	var sql strings.Builder
+	sql.Grow(100)
+
+	sql.WriteString("select ")
 	sel := p.selectSQL()
 	if p.MainTable == "" {
 		panic("MainTable is nil")
 	}
 	if p.MainAlias != "" {
 		if p.DBCore.DBType == dbtype.Oracle {
-			sql += sel + " from " + p.MainTable + " " + p.MainAlias
+			sql.WriteString(sel)
+			sql.WriteString(" from ")
+			sql.WriteString(p.MainTable)
+			sql.WriteByte(' ')
+			sql.WriteString(p.MainAlias)
 		} else {
-			sql += sel + " from " + p.MainTable + " as " + p.MainAlias
+			sql.WriteString(sel)
+			sql.WriteString(" from ")
+			sql.WriteString(p.MainTable)
+			sql.WriteString(" as ")
+			sql.WriteString(p.MainAlias)
 		}
 	} else {
-		sql += sel + " from " + p.MainTable
+		sql.WriteString(sel)
+		sql.WriteString(" from ")
+		sql.WriteString(p.MainTable)
 	}
 
 	join := p.joinSQL()
 	if join != "" {
-		sql += join
+		sql.WriteString(join)
 	}
 
 	where := p.andSQL(p.Where)
 	if where != "" {
-		sql += " where " + where
+		sql.WriteString(" where ")
+		sql.WriteString(where)
 	}
 
 	if len(p.GroupBy) > 0 {
-		sql += " group by " + util.JoinArr(p.GroupBy, ",")
+		sql.WriteString(" group by ")
+		sql.WriteString(util.JoinArr(p.GroupBy, ","))
 	}
 
 	if len(p.GroupBy) > 0 && len(p.Having) > 0 {
-		sql += " having " + p.andSQL(p.Having)
+		sql.WriteString(" having ")
+		sql.WriteString(p.andSQL(p.Having))
 	}
 
+	rawSql := sql.String()
+	sql.Reset()
+	sql.Grow(len(rawSql) + 50)
+	sql.WriteString("SELECT COUNT(*) as ")
+	sql.WriteString(p.DBCore.EscStart)
+	sql.WriteByte('c')
+	sql.WriteString(p.DBCore.EscEnd)
+	sql.WriteString(" from (")
+	sql.WriteString(rawSql)
 	if p.DBCore.DBType == dbtype.Oracle {
-		sql = fmt.Sprintf("SELECT COUNT(*) as %sc%s from (%s) %scount_tb%s",
-			p.DBCore.EscStart, p.DBCore.EscEnd,
-			sql,
-			p.DBCore.EscStart, p.DBCore.EscEnd)
+		sql.WriteString(") ")
 	} else {
-		sql = fmt.Sprintf("SELECT COUNT(*) as %sc%s from (%s) as %scount_tb%s",
-			p.DBCore.EscStart, p.DBCore.EscEnd,
-			sql,
-			p.DBCore.EscStart, p.DBCore.EscEnd)
+		sql.WriteString(") as ")
 	}
-	return sql
+	sql.WriteString(p.DBCore.EscStart)
+	sql.WriteString("count_tb")
+	sql.WriteString(p.DBCore.EscEnd)
+	return sql.String()
 }
 
 func (p *queryModel) innerFormatSubSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string,
 	colData interface{}) string {
-	subSQL := ""
+	var subSQL strings.Builder
+	subSQL.Grow(50)
 	switch colOperator {
 	case "eq":
-		subSQL = colName + "=" + val
+		subSQL.WriteString(colName)
+		subSQL.WriteByte('=')
+		subSQL.WriteString(val)
 	case "between":
-		subSQL = colName + " between " + val
+		subSQL.WriteString(colName)
+		subSQL.WriteString(" between ")
+		subSQL.WriteString(val)
 	case "lt":
-		subSQL = colName + "<" + val
+		subSQL.WriteString(colName)
+		subSQL.WriteByte('<')
+		subSQL.WriteString(val)
 	case "lte":
-		subSQL = colName + "<=" + val
+		subSQL.WriteString(colName)
+		subSQL.WriteString("<=")
+		subSQL.WriteString(val)
 	case "gt":
-		subSQL = colName + ">" + val
+		subSQL.WriteString(colName)
+		subSQL.WriteByte('>')
+		subSQL.WriteString(val)
 	case "gte":
-		subSQL = colName + ">=" + val
+		subSQL.WriteString(colName)
+		subSQL.WriteString(">=")
+		subSQL.WriteString(val)
 	case "ne":
-		subSQL = colName + "<>" + val
+		subSQL.WriteString(colName)
+		subSQL.WriteString("<>")
+		subSQL.WriteString(val)
 	case "in":
-		subSQL = colName + " in " + val
+		subSQL.WriteString(colName)
+		subSQL.WriteString(" in ")
+		subSQL.WriteString(val)
 	case "nin":
-		subSQL = colName + " not in " + val
+		subSQL.WriteString(colName)
+		subSQL.WriteString(" not in ")
+		subSQL.WriteString(val)
 	case "date":
 		if len(rawVal) == 10 {
 			rawVal += " 00:00:00"
@@ -97,22 +144,34 @@ func (p *queryModel) innerFormatSubSQL(colOperator string, colName string, val, 
 		strDate := strings.Split(rawVal, " ")[0] + " 00:00:00"
 		strNext := strings.Split(nextDay, " ")[0] + " 00:00:00"
 		if p.DBCore.DBType == dbtype.Oracle {
-			subSQL = fmt.Sprintf("%s>=%s and %s<%s",
-				colName, oracleDateTime(strDate, false), colName, oracleDateTime(strNext, false))
+			subSQL.WriteString(colName)
+			subSQL.WriteString(">=")
+			subSQL.WriteString(oracleDateTime(strDate, false))
+			subSQL.WriteString(" and ")
+			subSQL.WriteString(colName)
+			subSQL.WriteString("<")
+			subSQL.WriteString(oracleDateTime(strNext, false))
 		} else {
-			subSQL = fmt.Sprintf("%s>='%s' and %s<'%s'",
-				colName, strDate, colName, strNext)
+			subSQL.WriteString(colName)
+			subSQL.WriteString(">='")
+			subSQL.WriteString(strDate)
+			subSQL.WriteString("' and ")
+			subSQL.WriteString(colName)
+			subSQL.WriteString("<'")
+			subSQL.WriteString(strNext)
+			subSQL.WriteByte('\'')
 		}
 	case "null":
+		subSQL.WriteString(colName)
 		if colData.(bool) {
-			subSQL = colName + " is null"
+			subSQL.WriteString(" is null")
 		} else {
-			subSQL = colName + " is not null"
+			subSQL.WriteString(" is not null")
 		}
 	default:
-		subSQL = p.formatLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
+		return p.formatLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
 	}
-	return subSQL
+	return subSQL.String()
 }
 
 func (p *queryModel) innerBinFormatSubSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string,
@@ -147,124 +206,186 @@ func (p *queryModel) innerIgnoreFormatSubSQL(colOperator string, colName string,
 }
 
 func (p *queryModel) formatLikeSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string) string {
-	subSQL := ""
+	var subSQL strings.Builder
+	subSQL.Grow(20)
 	switch colOperator {
 	case "startswith":
 		if rawVal != "" {
-			subSQL = colName + " like '" + rawVal + "%'"
+			subSQL.WriteString(colName)
+			subSQL.WriteString(" like '")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%'")
 		}
 	case "endswith":
 		if rawVal != "" {
-			subSQL = colName + " like '%" + rawVal + "'"
+			subSQL.WriteString(colName)
+			subSQL.WriteString(" like '%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteByte('\'')
 		}
 	case "contains":
 		if rawVal != "" {
-			subSQL = colName + " like '%" + rawVal + "%'"
+			subSQL.WriteString(colName)
+			subSQL.WriteString(" like '%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%'")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like '%" + v + "%'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " and " + colName + " like '%" + v + "%'"
+					subSQL.WriteString(" and ")
 				}
+
+				subSQL.WriteString(colName)
+				subSQL.WriteString(" like '%")
+				subSQL.WriteString(v)
+				subSQL.WriteString("%'")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "customlike":
 		if rawVal != "" {
-			subSQL = colName + " like '" + rawVal + "'"
+			subSQL.WriteString(colName)
+			subSQL.WriteString(" like '")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteByte('\'')
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like '" + v + "'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " and " + colName + " like '" + v + "'"
+					subSQL.WriteString(" and ")
 				}
+				subSQL.WriteString(colName)
+				subSQL.WriteString(" like '")
+				subSQL.WriteString(v)
+				subSQL.WriteByte('\'')
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	default:
-		subSQL = p.formatOrLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
+		return p.formatOrLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
 	}
-	return subSQL
+	return subSQL.String()
 }
 
 func (p *queryModel) formatOrLikeSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string) string {
-	subSQL := ""
+	var subSQL strings.Builder
 	switch colOperator {
 	case "orstartswith":
 		if rawVal != "" {
-			subSQL = colName + " like '" + rawVal + "%'"
+			subSQL.WriteString(colName)
+			subSQL.WriteString(" like '")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%'")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like '" + v + "%'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteString("(")
 				} else {
-					subSQL += " or " + colName + " like '" + v + "%'"
+					subSQL.WriteString(" or ")
 				}
+				subSQL.WriteString(colName)
+				subSQL.WriteString(" like '")
+				subSQL.WriteString(v)
+				subSQL.WriteString("%'")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "orendswith":
 		if rawVal != "" {
-			subSQL = colName + " like '%" + rawVal + "'"
+			subSQL.WriteString(colName)
+			subSQL.WriteString(" like '%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("'")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like '%" + v + "'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteString("(")
 				} else {
-					subSQL += " or " + colName + " like '%" + v + "'"
+					subSQL.WriteString(" or ")
 				}
+				subSQL.WriteString(colName)
+				subSQL.WriteString(" like '%")
+				subSQL.WriteString(v)
+				subSQL.WriteString("'")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "orcontains":
 		if rawVal != "" {
-			subSQL = colName + " like '%" + rawVal + "%'"
+			subSQL.WriteString(colName)
+			subSQL.WriteString(" like '%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%'")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like '%" + v + "%'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteString("(")
 				} else {
-					subSQL += " or " + colName + " like '%" + v + "%'"
+					subSQL.WriteString(" or ")
 				}
+				subSQL.WriteString(colName)
+				subSQL.WriteString(" like '%")
+				subSQL.WriteString(v)
+				subSQL.WriteString("%'")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "orcustomlike":
 		if rawVal != "" {
-			subSQL = colName + " like '" + rawVal + "'"
+			subSQL.WriteString(colName)
+			subSQL.WriteString(" like '")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteByte('\'')
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like '" + v + "'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteString("(")
 				} else {
-					subSQL += " or " + colName + " like '" + v + "'"
+					subSQL.WriteString(" or ")
 				}
+
+				subSQL.WriteString(colName)
+				subSQL.WriteString(" like '")
+				subSQL.WriteString(v)
+				subSQL.WriteByte('\'')
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	default:
 		panic("no definition")
 	}
-	return subSQL
+	return subSQL.String()
 }
 
 // orm
-func (orm *ORM) innerInsertSQL(data interface{}) (string, error) {
+func (orm *ORM) innerInsertOrReplaceSQL(tp string, data interface{}) (string, error) {
 	dbCore := orm.ref.getDBConf()
-	insertSQL := "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values(%s)"
+	escLen := len(dbCore.EscStart) + len(dbCore.EscEnd)
+
+	var insertSQL strings.Builder
+	insertSQL.Grow(200)
+	insertSQL.WriteString(tp)
+	insertSQL.WriteString(" into ")
+	insertSQL.WriteString(dbCore.EscStart)
+	insertSQL.WriteString(orm.tableName)
+	insertSQL.WriteString(dbCore.EscEnd)
+	insertSQL.WriteByte('(')
 
 	if data == nil {
 		return "", fmt.Errorf("insert data is nil")
 	}
 
-	typeErrStr := "type of insert data is []map[string]interface{} or []*struct or []struct"
+	typeErrStr := "type of data is map[string]interface{} or *struct or struct"
 	var cols []string
 	var values []string
 
 	switch data := data.(type) {
 	case map[string]interface{}:
+		cols = make([]string, 0, len(data))
+		values = make([]string, 0, len(data))
 		for k, v := range data {
 			if k[0] == '#' {
 				k = k[1:]
@@ -272,8 +393,14 @@ func (orm *ORM) innerInsertSQL(data interface{}) (string, error) {
 				if err != nil {
 					return "", err
 				}
-				cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
-				values = append(values, fmt.Sprintf("%v", v))
+				var formatKey strings.Builder
+				formatKey.Grow(escLen + len(k))
+				formatKey.WriteString(dbCore.EscStart)
+				formatKey.WriteString(k)
+				formatKey.WriteString(dbCore.EscEnd)
+
+				cols = append(cols, formatKey.String())
+				values = append(values, util.InterfaceToString(v))
 				continue
 			}
 
@@ -289,7 +416,13 @@ func (orm *ORM) innerInsertSQL(data interface{}) (string, error) {
 			if timeEmpty {
 				continue
 			} else {
-				cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
+				var formatKey strings.Builder
+				formatKey.Grow(escLen + len(k))
+				formatKey.WriteString(dbCore.EscStart)
+				formatKey.WriteString(k)
+				formatKey.WriteString(dbCore.EscEnd)
+
+				cols = append(cols, formatKey.String())
 				values = append(values, val)
 			}
 		}
@@ -326,7 +459,13 @@ func (orm *ORM) innerInsertSQL(data interface{}) (string, error) {
 			if timeEmpty {
 				continue
 			} else {
-				cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, colName, dbCore.EscEnd))
+				var formatKey strings.Builder
+				formatKey.Grow(escLen + len(colName))
+				formatKey.WriteString(dbCore.EscStart)
+				formatKey.WriteString(colName)
+				formatKey.WriteString(dbCore.EscEnd)
+
+				cols = append(cols, formatKey.String())
 				values = append(values, val)
 			}
 		}
@@ -335,25 +474,32 @@ func (orm *ORM) innerInsertSQL(data interface{}) (string, error) {
 		return "", fmt.Errorf("sql data is empty, please check it")
 	}
 
-	insertSQL = fmt.Sprintf(insertSQL, orm.tableName, util.JoinArr(cols, ","), util.JoinArr(values, ","))
-	return insertSQL, nil
+	insertSQL.WriteString(util.JoinArr(cols, ","))
+	insertSQL.WriteString(") values(")
+	insertSQL.WriteString(util.JoinArr(values, ","))
+	insertSQL.WriteByte(')')
+	return insertSQL.String(), nil
 }
 
-func (orm *ORM) innerInsertManySQL(dataList []interface{}, cols []string) (string, error) {
-	dbCore := orm.ref.getDBConf()
-
-	var insertSQL strings.Builder
-	insertSQL.WriteString("insert into ")
-	insertSQL.WriteString(dbCore.EscStart)
-	insertSQL.WriteString(orm.tableName)
-	insertSQL.WriteString(dbCore.EscEnd)
-	// insertSQL := "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values%s"
-
+func (orm *ORM) innerInsertOrReplaceManySQL(tp string, dataList []interface{}, cols []string) (string, error) {
 	if len(dataList) <= 0 {
 		return "", fmt.Errorf("insert data is nil")
 	}
 
-	typeErrStr := "type of insert data is []map[string]interface{} or []*struct or []struct"
+	dbCore := orm.ref.getDBConf()
+
+	escLen := len(dbCore.EscStart) + len(dbCore.EscEnd)
+
+	var insertSQL strings.Builder
+	insertSQL.Grow(len(dataList)*len(cols)*5 + 100)
+
+	insertSQL.WriteString(tp)
+	insertSQL.WriteString(" into ")
+	insertSQL.WriteString(dbCore.EscStart)
+	insertSQL.WriteString(orm.tableName)
+	insertSQL.WriteString(dbCore.EscEnd)
+
+	typeErrStr := "type of data is []map[string]interface{} or []*struct or []struct"
 
 	valArr := make([]string, 0, len(dataList))
 	for _, data := range dataList {
@@ -394,25 +540,26 @@ func (orm *ORM) innerInsertManySQL(dataList []interface{}, cols []string) (strin
 		var subVal strings.Builder
 		subVal.Grow(len(cols) * 10)
 		subVal.WriteByte('(')
-		for _, colName := range cols {
-			if v, ok := valMap[colName]; ok {
+		for i := range cols {
+			if i > 0 {
+				subVal.WriteByte(',')
+			}
+			if v, ok := valMap[cols[i]]; ok {
 				val, timeEmpty := orm.formatValue(v)
-				if (colName == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
-					subVal.WriteString("null,")
+				if (cols[i] == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
+					subVal.WriteString("null")
 					continue
 				}
 
 				subVal.WriteString(val)
-				subVal.WriteByte(',')
-			} else if v, ok = valMap["#"+colName]; ok {
-				subVal.WriteString(fmt.Sprintf("%v,", v))
+			} else if v, ok = valMap["#"+cols[i]]; ok {
+				subVal.WriteString(util.InterfaceToString(v))
 			} else {
-				subVal.WriteString("null,")
+				subVal.WriteString("null")
 			}
 		}
-		s := []byte(subVal.String())
-		s[len(s)-1] = ')'
-		valArr = append(valArr, string(s))
+		subVal.WriteByte(')')
+		valArr = append(valArr, subVal.String())
 	}
 
 	if len(valArr) <= 0 {
@@ -425,20 +572,32 @@ func (orm *ORM) innerInsertManySQL(dataList []interface{}, cols []string) (strin
 		if err != nil {
 			return "", err
 		}
-		newCols = append(newCols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
+
+		var buf strings.Builder
+		buf.Grow(escLen + len(k))
+		buf.WriteString(dbCore.EscStart)
+		buf.WriteString(k)
+		buf.WriteString(dbCore.EscEnd)
+
+		newCols = append(newCols, buf.String())
 	}
 	insertSQL.WriteByte('(')
 	insertSQL.WriteString(util.JoinArr(newCols, ","))
 	insertSQL.WriteString(") values")
 	insertSQL.WriteString(util.JoinArr(valArr, ","))
-	// insertSQL = fmt.Sprintf(insertSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(valArr, ","))
 	return insertSQL.String(), nil
 }
 
 func (orm *ORM) innerUpdateSQL(data interface{}) (string, error) {
 	dbCore := orm.ref.getDBConf()
-	updateSQL := "update " + dbCore.EscStart + "%s" + dbCore.EscEnd + " set %s where " +
-		dbCore.EscStart + "%s" + dbCore.EscEnd + "=%s"
+	escLen := len(dbCore.EscStart) + len(dbCore.EscEnd)
+
+	var updateSQL strings.Builder
+	updateSQL.WriteString("update ")
+	updateSQL.WriteString(dbCore.EscStart)
+	updateSQL.WriteString(orm.tableName)
+	updateSQL.WriteString(dbCore.EscEnd)
+	updateSQL.WriteString(" set ")
 
 	if data == nil {
 		return "", fmt.Errorf("update data is nil")
@@ -459,8 +618,16 @@ func (orm *ORM) innerUpdateSQL(data interface{}) (string, error) {
 					return "", err
 				}
 
-				upSet = append(upSet, fmt.Sprintf("%s%s%s=%v",
-					dbCore.EscStart, k, dbCore.EscEnd, v))
+				strVal := util.InterfaceToString(v)
+
+				var formatSet strings.Builder
+				formatSet.Grow(escLen + len(k) + len(strVal) + 1)
+				formatSet.WriteString(dbCore.EscStart)
+				formatSet.WriteString(k)
+				formatSet.WriteString(dbCore.EscEnd)
+				formatSet.WriteByte('=')
+				formatSet.WriteString(strVal)
+				upSet = append(upSet, formatSet.String())
 				continue
 			}
 
@@ -478,8 +645,15 @@ func (orm *ORM) innerUpdateSQL(data interface{}) (string, error) {
 				val = "null"
 			}
 
-			upSet = append(upSet, fmt.Sprintf("%s%s%s=%s",
-				dbCore.EscStart, k, dbCore.EscEnd, val))
+			var formatSet strings.Builder
+			formatSet.Grow(escLen + len(k) + len(val) + 1)
+			formatSet.WriteString(dbCore.EscStart)
+			formatSet.WriteString(k)
+			formatSet.WriteString(dbCore.EscEnd)
+			formatSet.WriteByte('=')
+			formatSet.WriteString(val)
+
+			upSet = append(upSet, formatSet.String())
 		}
 	default:
 		dataValue := reflect.ValueOf(data)
@@ -516,185 +690,28 @@ func (orm *ORM) innerUpdateSQL(data interface{}) (string, error) {
 				continue
 			}
 
-			upSet = append(upSet, fmt.Sprintf("%s%s%s=%s",
-				dbCore.EscStart, colName, dbCore.EscEnd, val))
+			var formatSet strings.Builder
+			formatSet.Grow(escLen + len(colName) + len(val) + 1)
+			formatSet.WriteString(dbCore.EscStart)
+			formatSet.WriteString(colName)
+			formatSet.WriteString(dbCore.EscEnd)
+			formatSet.WriteByte('=')
+			formatSet.WriteString(val)
+			upSet = append(upSet, formatSet.String())
 		}
 	}
 	if primaryVal == "" {
 		return "", fmt.Errorf("sql primary value is empty, please check it")
 	}
 
-	primaryVal = strings.ReplaceAll(primaryVal, "'", dbCore.StrEsc+"'")
-	updateSQL = fmt.Sprintf(updateSQL, orm.tableName, util.JoinArr(upSet, ","), orm.primaryKey, primaryVal)
-	return updateSQL, nil
-}
+	primaryVal = strings.ReplaceAll(primaryVal, "'", "''")
 
-func (orm *ORM) innerReplaceSQL(data interface{}) (string, error) {
-	dbCore := orm.ref.getDBConf()
-	replaceSQL := "replace into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values(%s)"
-
-	if data == nil {
-		return "", fmt.Errorf("insert data is nil")
-	}
-
-	typeErrStr := "type of insert data is []map[string]interface{} or []*struct or []struct"
-	var cols []string
-	var values []string
-
-	switch data := data.(type) {
-	case map[string]interface{}:
-		for k, v := range data {
-			if k[0] == '#' {
-				k = k[1:]
-				err := globalVerifyObj.VerifyFieldName(k)
-				if err != nil {
-					return "", err
-				}
-				cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
-				values = append(values, fmt.Sprintf("%v", v))
-				continue
-			}
-
-			err := globalVerifyObj.VerifyFieldName(k)
-			if err != nil {
-				return "", err
-			}
-
-			val, timeEmpty := orm.formatValue(v)
-			if k == orm.primaryKey && (val == "" || val == "0") {
-				continue
-			}
-			if timeEmpty {
-				continue
-			} else {
-				cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
-				values = append(values, val)
-			}
-		}
-	default:
-		dataValue := reflect.ValueOf(data)
-		if dataValue.Type().Kind() != reflect.Struct && dataValue.Type().Kind() != reflect.Ptr {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		if dataValue.Type().Kind() == reflect.Ptr {
-			dataValue = dataValue.Elem()
-		}
-
-		if dataValue.Type().Kind() != reflect.Struct {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		for i := 0; i < dataValue.NumField(); i++ {
-			colName := dataValue.Type().Field(i).Tag.Get("json")
-			ref := dataValue.Type().Field(i).Tag.Get("ref")
-			if ref != "" || colName == "" || !dataValue.Type().Field(i).IsExported() {
-				continue
-			}
-
-			err := globalVerifyObj.VerifyFieldName(colName)
-			if err != nil {
-				return "", err
-			}
-
-			val, timeEmpty := orm.formatValue(dataValue.Field(i).Interface())
-			if colName == orm.primaryKey && (val == "" || val == "0") {
-				continue
-			}
-			if timeEmpty {
-				continue
-			} else {
-				cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, colName, dbCore.EscEnd))
-				values = append(values, val)
-			}
-		}
-	}
-	if len(cols) <= 0 || len(values) <= 0 {
-		return "", fmt.Errorf("sql data is empty, please check it")
-	}
-
-	replaceSQL = fmt.Sprintf(replaceSQL, orm.tableName, util.JoinArr(cols, ","), util.JoinArr(values, ","))
-	return replaceSQL, nil
-}
-
-func (orm *ORM) innerReplaceManySQL(dataList []interface{}, cols []string) (string, error) {
-	dbCore := orm.ref.getDBConf()
-	replaceSQL := "replace into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values%s"
-
-	if len(dataList) <= 0 {
-		return "", fmt.Errorf("insert data is nil")
-	}
-
-	typeErrStr := "type of replace data is []map[string]interface{} or []*struct or []struct"
-
-	var valArr []string
-	for _, data := range dataList {
-		var valMap map[string]interface{}
-		switch data := data.(type) {
-		case map[string]interface{}:
-			valMap = data
-		default:
-			dataValue := reflect.ValueOf(data)
-			if dataValue.Type().Kind() != reflect.Struct && dataValue.Type().Kind() != reflect.Ptr {
-				return "", fmt.Errorf(typeErrStr)
-			}
-
-			if dataValue.Type().Kind() == reflect.Ptr {
-				dataValue = dataValue.Elem()
-			}
-
-			if dataValue.Type().Kind() != reflect.Struct {
-				return "", fmt.Errorf(typeErrStr)
-			}
-
-			valMap = map[string]interface{}{}
-
-			for i := 0; i < dataValue.NumField(); i++ {
-				colName := dataValue.Type().Field(i).Tag.Get("json")
-				ref := dataValue.Type().Field(i).Tag.Get("ref")
-				if ref != "" || colName == "" || !dataValue.Type().Field(i).IsExported() {
-					continue
-				}
-
-				valMap[colName] = dataValue.Field(i).Interface()
-			}
-		}
-		if len(valMap) <= 0 {
-			return "", fmt.Errorf("sql data is empty, please check it")
-		}
-
-		subVal := "("
-		for _, colName := range cols {
-			if v, ok := valMap[colName]; ok {
-				val, timeEmpty := orm.formatValue(v)
-				if (colName == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
-					subVal += "null,"
-					continue
-				}
-
-				subVal += val + ","
-			} else if v, ok = valMap["#"+colName]; ok {
-				subVal += fmt.Sprintf("%v,", v)
-			} else {
-				subVal += "null,"
-			}
-		}
-		subVal = subVal[:len(subVal)-1] + ")"
-		valArr = append(valArr, subVal)
-	}
-
-	if len(valArr) <= 0 {
-		return "", fmt.Errorf("replace data is empty")
-	}
-
-	newCols := make([]string, 0, len(cols))
-	for _, k := range cols {
-		err := globalVerifyObj.VerifyFieldName(k)
-		if err != nil {
-			return "", err
-		}
-		newCols = append(newCols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
-	}
-	replaceSQL = fmt.Sprintf(replaceSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(valArr, ","))
-	return replaceSQL, nil
+	updateSQL.WriteString(util.JoinArr(upSet, ","))
+	updateSQL.WriteString(" where ")
+	updateSQL.WriteString(dbCore.EscStart)
+	updateSQL.WriteString(orm.primaryKey)
+	updateSQL.WriteString(dbCore.EscEnd)
+	updateSQL.WriteByte('=')
+	updateSQL.WriteString(primaryVal)
+	return updateSQL.String(), nil
 }

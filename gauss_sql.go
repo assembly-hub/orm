@@ -3,6 +3,7 @@ package orm
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
@@ -11,18 +12,29 @@ import (
 // orm
 func (orm *ORM) gaussUpsertSQL(data interface{}) (string, error) {
 	dbCore := orm.ref.getDBConf()
+	escLen := len(dbCore.EscStart) + len(dbCore.EscEnd)
+
+	var upsertSQL strings.Builder
+	upsertSQL.Grow(100)
+	upsertSQL.WriteString("insert into ")
+	upsertSQL.WriteString(dbCore.EscStart)
+	upsertSQL.WriteString(orm.tableName)
+	upsertSQL.WriteString(dbCore.EscEnd)
+	upsertSQL.WriteByte('(')
 
 	if data == nil {
-		return "", fmt.Errorf("upsert data is nil")
+		return "", fmt.Errorf("insert data is nil")
 	}
 
-	typeErrStr := "type of upsert data is []map[string]interface{} or []*struct or []struct"
-	var cols []string
-	colSet := set.New[string]()
+	typeErrStr := "type of upsert data is map[string]interface{} or *struct or struct"
+	var formatCols []string
 	var values []string
+	colSet := set.New[string]()
 
 	switch data := data.(type) {
 	case map[string]interface{}:
+		formatCols = make([]string, 0, len(data))
+		values = make([]string, 0, len(data))
 		for k, v := range data {
 			if k[0] == '#' {
 				k = k[1:]
@@ -30,9 +42,15 @@ func (orm *ORM) gaussUpsertSQL(data interface{}) (string, error) {
 				if err != nil {
 					return "", err
 				}
-				cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
+				var formatKey strings.Builder
+				formatKey.Grow(escLen + len(k))
+				formatKey.WriteString(dbCore.EscStart)
+				formatKey.WriteString(k)
+				formatKey.WriteString(dbCore.EscEnd)
+
 				colSet.Add(k)
-				values = append(values, fmt.Sprintf("%v", v))
+				formatCols = append(formatCols, formatKey.String())
+				values = append(values, util.InterfaceToString(v))
 				continue
 			}
 
@@ -47,11 +65,17 @@ func (orm *ORM) gaussUpsertSQL(data interface{}) (string, error) {
 			}
 			if timeEmpty {
 				continue
-			}
+			} else {
+				var formatKey strings.Builder
+				formatKey.Grow(escLen + len(k))
+				formatKey.WriteString(dbCore.EscStart)
+				formatKey.WriteString(k)
+				formatKey.WriteString(dbCore.EscEnd)
 
-			cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
-			colSet.Add(k)
-			values = append(values, val)
+				colSet.Add(k)
+				formatCols = append(formatCols, formatKey.String())
+				values = append(values, val)
+			}
 		}
 	default:
 		dataValue := reflect.ValueOf(data)
@@ -74,20 +98,31 @@ func (orm *ORM) gaussUpsertSQL(data interface{}) (string, error) {
 				continue
 			}
 
+			err := globalVerifyObj.VerifyFieldName(colName)
+			if err != nil {
+				return "", err
+			}
+
 			val, timeEmpty := orm.formatValue(dataValue.Field(i).Interface())
 			if colName == orm.primaryKey && (val == "" || val == "0") {
 				continue
 			}
 			if timeEmpty {
 				continue
-			}
+			} else {
+				var formatKey strings.Builder
+				formatKey.Grow(escLen + len(colName))
+				formatKey.WriteString(dbCore.EscStart)
+				formatKey.WriteString(colName)
+				formatKey.WriteString(dbCore.EscEnd)
 
-			cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, colName, dbCore.EscEnd))
-			colSet.Add(colName)
-			values = append(values, val)
+				colSet.Add(colName)
+				formatCols = append(formatCols, formatKey.String())
+				values = append(values, val)
+			}
 		}
 	}
-	if len(cols) <= 0 || len(values) <= 0 {
+	if len(formatCols) <= 0 || len(values) <= 0 {
 		return "", fmt.Errorf("sql data is empty, please check it")
 	}
 
@@ -97,52 +132,69 @@ func (orm *ORM) gaussUpsertSQL(data interface{}) (string, error) {
 		hasUK = orm.checkUK(colSet)
 	}
 
-	var update []string
+	upsertSQL.WriteString(util.JoinArr(formatCols, ","))
+	upsertSQL.WriteString(") values(")
+	upsertSQL.WriteString(util.JoinArr(values, ","))
+	upsertSQL.WriteByte(')')
+	if hasPK || hasUK {
+		upsertSQL.WriteString(" on duplicate key update ")
 
-	upsertSQL := "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values(%s) " +
-		"on duplicate key update %s"
-	if hasPK {
-		colSet.Del(orm.primaryKey)
-		if colSet.Empty() {
-			return "", fmt.Errorf("no data")
+		excludeSet := set.New[string]()
+		if hasPK {
+			excludeSet.Add(orm.primaryKey)
+		} else {
+			excludeSet = orm.uniqueKeys
 		}
-		colSet.Range(func(item string) bool {
-			update = append(update, fmt.Sprintf("%s%s%s=values(%s%s%s)",
-				dbCore.EscStart, item, dbCore.EscEnd, dbCore.EscStart, item, dbCore.EscEnd))
-			return hasUK
-		})
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(cols, ","),
-			util.JoinArr(values, ","), util.JoinArr(update, ","))
-	} else if hasUK {
-		colSet.Del(orm.uniqueKeys.ToList()...)
-		if colSet.Empty() {
-			return "", fmt.Errorf("no data")
+
+		hasData := false
+		for k := range colSet {
+			if excludeSet.Has(k) {
+				continue
+			}
+
+			if hasData {
+				upsertSQL.WriteByte(',')
+			}
+			hasData = true
+
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(k)
+			upsertSQL.WriteString(dbCore.EscEnd)
+			upsertSQL.WriteString("=values(")
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(k)
+			upsertSQL.WriteString(dbCore.EscEnd)
+			upsertSQL.WriteByte(')')
 		}
-		colSet.Range(func(item string) bool {
-			update = append(update, fmt.Sprintf("%s%s%s=values(%s%s%s)",
-				dbCore.EscStart, item, dbCore.EscEnd, dbCore.EscStart, item, dbCore.EscEnd))
-			return hasUK
-		})
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(cols, ","),
-			util.JoinArr(values, ","), util.JoinArr(update, ","))
-	} else {
-		upsertSQL = "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values(%s)"
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(cols, ","), util.JoinArr(values, ","))
+
+		if !hasData {
+			return "", fmt.Errorf("duplicate update field is empty")
+		}
 	}
 
-	return upsertSQL, nil
+	return upsertSQL.String(), nil
 }
 
 func (orm *ORM) gaussUpsertManySQL(dataList []interface{}, cols []string) (string, error) {
+	if len(dataList) <= 0 {
+		return "", fmt.Errorf("insert data is nil")
+	}
+
 	dbCore := orm.ref.getDBConf()
 
-	if len(dataList) <= 0 {
-		return "", fmt.Errorf("upsert data is nil")
-	}
+	escLen := len(dbCore.EscStart) + len(dbCore.EscEnd)
+
+	var upsertSQL strings.Builder
+	upsertSQL.Grow(len(dataList)*len(cols)*5 + 100)
+
+	upsertSQL.WriteString("insert into ")
+	upsertSQL.WriteString(dbCore.EscStart)
+	upsertSQL.WriteString(orm.tableName)
+	upsertSQL.WriteString(dbCore.EscEnd)
 
 	typeErrStr := "type of upsert data is []map[string]interface{} or []*struct or []struct"
 
-	var valArr []string
+	valArr := make([]string, 0, len(dataList))
 	for _, data := range dataList {
 		var valMap map[string]interface{}
 		switch data := data.(type) {
@@ -178,42 +230,57 @@ func (orm *ORM) gaussUpsertManySQL(dataList []interface{}, cols []string) (strin
 			return "", fmt.Errorf("sql data is empty, please check it")
 		}
 
-		subVal := "("
-		for _, colName := range cols {
-			if v, ok := valMap[colName]; ok {
+		var subVal strings.Builder
+		subVal.Grow(len(cols) * 10)
+		subVal.WriteByte('(')
+		for i := range cols {
+			if i > 0 {
+				subVal.WriteByte(',')
+			}
+			if v, ok := valMap[cols[i]]; ok {
 				val, timeEmpty := orm.formatValue(v)
-				if (colName == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
-					subVal += "null,"
+				if (cols[i] == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
+					subVal.WriteString("null")
 					continue
 				}
 
-				subVal += val + ","
-			} else if v, ok = valMap["#"+colName]; ok {
-				subVal += fmt.Sprintf("%v,", v)
+				subVal.WriteString(val)
+			} else if v, ok = valMap["#"+cols[i]]; ok {
+				subVal.WriteString(util.InterfaceToString(v))
 			} else {
-				subVal += "null,"
+				subVal.WriteString("null")
 			}
 		}
-		subVal = subVal[:len(subVal)-1] + ")"
-		valArr = append(valArr, subVal)
+		subVal.WriteByte(')')
+		valArr = append(valArr, subVal.String())
 	}
 
 	if len(valArr) <= 0 {
-		return "", fmt.Errorf("upsert data is empty")
+		return "", fmt.Errorf("insert data is empty")
 	}
 
-	newCols := make([]string, 0, len(cols))
-	updateCols := make([]string, 0, len(cols))
+	colSet := set.New[string]()
+	formatCols := make([]string, 0, len(cols))
 	for _, k := range cols {
 		err := globalVerifyObj.VerifyFieldName(k)
 		if err != nil {
 			return "", err
 		}
-		newCols = append(newCols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
+
+		var buf strings.Builder
+		buf.Grow(escLen + len(k))
+		buf.WriteString(dbCore.EscStart)
+		buf.WriteString(k)
+		buf.WriteString(dbCore.EscEnd)
+
+		formatCols = append(formatCols, buf.String())
+		colSet.Add(k)
 	}
 
-	colSet := set.New[string]()
-	colSet.Add(cols...)
+	upsertSQL.WriteByte('(')
+	upsertSQL.WriteString(util.JoinArr(formatCols, ","))
+	upsertSQL.WriteString(") values")
+	upsertSQL.WriteString(util.JoinArr(valArr, ","))
 
 	hasPK := colSet.Has(orm.primaryKey)
 	hasUK := false
@@ -221,36 +288,41 @@ func (orm *ORM) gaussUpsertManySQL(dataList []interface{}, cols []string) (strin
 		hasUK = orm.checkUK(colSet)
 	}
 
-	upsertSQL := "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values%s " +
-		"on duplicate key update %s"
-	if hasPK {
-		colSet.Del(orm.primaryKey)
-		if colSet.Empty() {
-			return "", fmt.Errorf("no data")
+	if hasPK || hasUK {
+		upsertSQL.WriteString(" on duplicate key update ")
+
+		excludeSet := set.New[string]()
+		if hasPK {
+			excludeSet.Add(orm.primaryKey)
+		} else {
+			excludeSet = orm.uniqueKeys
 		}
-		colSet.Range(func(item string) bool {
-			updateCols = append(updateCols, fmt.Sprintf("%s%s%s=values(%s%s%s)",
-				dbCore.EscStart, item, dbCore.EscEnd, dbCore.EscStart, item, dbCore.EscEnd))
-			return hasUK
-		})
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(newCols, ","),
-			util.JoinArr(valArr, ","), util.JoinArr(updateCols, ","))
-	} else if hasUK {
-		colSet.Del(orm.uniqueKeys.ToList()...)
-		if colSet.Empty() {
-			return "", fmt.Errorf("no data")
+
+		hasData := false
+		for k := range colSet {
+			if excludeSet.Has(k) {
+				continue
+			}
+
+			if hasData {
+				upsertSQL.WriteByte(',')
+			}
+			hasData = true
+
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(k)
+			upsertSQL.WriteString(dbCore.EscEnd)
+			upsertSQL.WriteString("=values(")
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(k)
+			upsertSQL.WriteString(dbCore.EscEnd)
+			upsertSQL.WriteByte(')')
 		}
-		colSet.Range(func(item string) bool {
-			updateCols = append(updateCols, fmt.Sprintf("%s%s%s=values(%s%s%s)",
-				dbCore.EscStart, item, dbCore.EscEnd, dbCore.EscStart, item, dbCore.EscEnd))
-			return hasUK
-		})
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(newCols, ","),
-			util.JoinArr(valArr, ","), util.JoinArr(updateCols, ","))
-	} else {
-		upsertSQL = "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values(%s)"
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(valArr, ","))
+
+		if !hasData {
+			return "", fmt.Errorf("duplicate update field is empty")
+		}
 	}
 
-	return upsertSQL, nil
+	return upsertSQL.String(), nil
 }

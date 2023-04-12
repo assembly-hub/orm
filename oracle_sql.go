@@ -3,44 +3,56 @@ package orm
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
 )
 
-const oracleTimeFormat = "'yyyy-mm-dd hh24:mi:ss'"
-const oracleDateFormat = "'yyyy-mm-dd'"
+const oracleTimeFormat = "yyyy-mm-dd hh24:mi:ss"
+const oracleDateFormat = "yyyy-mm-dd"
 
 func oracleDateTime(s string, isDate bool) string {
+	var strBuf strings.Builder
+	strBuf.Grow(50)
+	strBuf.WriteString("TO_DATE('")
+	strBuf.WriteString(s)
+	strBuf.WriteString("','")
 	if isDate {
-		return fmt.Sprintf("TO_DATE('%s',%s)", s, oracleDateFormat)
+		strBuf.WriteString(oracleDateFormat)
+	} else {
+		strBuf.WriteString(oracleTimeFormat)
 	}
-	return fmt.Sprintf("TO_DATE('%s',%s)", s, oracleTimeFormat)
+	strBuf.WriteString("')")
+	return strBuf.String()
 }
 
 // queryModel
 func (p *queryModel) queryOracle() string {
-	sql := "select "
+	var sql strings.Builder
+	sql.Grow(100)
+	sql.WriteString("select ")
+
 	sel := p.selectSQL()
 	if p.MainTable == "" {
 		panic("MainTable is nil")
 	}
+	sql.WriteString(sel)
+	sql.WriteString(" from ")
+	sql.WriteString(p.MainTable)
 	if p.MainAlias != "" {
-		sql += sel + " from " + p.MainTable + " " + p.MainAlias
-	} else {
-		sql += sel + " from " + p.MainTable
+		sql.WriteString(" ")
+		sql.WriteString(p.MainAlias)
 	}
 
 	join := p.joinSQL()
 	if join != "" {
-		sql += join
+		sql.WriteString(join)
 	}
 
 	limitSQL := ""
 	if len(p.Limit) == 1 {
-		limitSQL += "rownum<=" + util.IntToStr(int64(p.Limit[0]))
-	} else if len(p.Limit) == 2 {
-		limitSQL += fmt.Sprintf("rownum>%d and rownum<=%d", p.Limit[0], p.Limit[0]+p.Limit[1])
+		limitSQL += "rownum<=" + util.UintToStr(p.Limit[0])
 	}
 
 	where := p.andSQL(p.Where)
@@ -48,189 +60,283 @@ func (p *queryModel) queryOracle() string {
 		if limitSQL != "" {
 			limitSQL = " and " + limitSQL
 		}
-		sql += " where " + where + limitSQL
+		sql.WriteString(" where ")
+		sql.WriteString(where)
+		sql.WriteString(limitSQL)
 	} else if limitSQL != "" {
-		sql += " where " + limitSQL
+		sql.WriteString(" where ")
+		sql.WriteString(limitSQL)
 	}
 
 	if len(p.GroupBy) > 0 {
-		sql += " group by " + util.JoinArr(p.GroupBy, ",")
+		sql.WriteString(" group by ")
+		sql.WriteString(util.JoinArr(p.GroupBy, ","))
 	}
 
 	if len(p.GroupBy) > 0 && len(p.Having) > 0 {
-		sql += " having " + p.andSQL(p.Having)
+		sql.WriteString(" having ")
+		sql.WriteString(p.andSQL(p.Having))
 	}
 
 	order := p.orderSQL()
 	if order != "" {
-		sql += " order by " + order
+		sql.WriteString(" order by ")
+		sql.WriteString(order)
+	}
+
+	if len(p.Limit) == 2 {
+		sql.WriteString(" OFFSET ")
+		sql.WriteString(util.UintToStr(p.Limit[0]))
+		sql.WriteString(" ROWS FETCH NEXT ")
+		sql.WriteString(util.UintToStr(p.Limit[1]))
+		sql.WriteString(" ROWS ONLY")
 	}
 
 	if p.SelectForUpdate {
-		sql += " for update"
+		sql.WriteString(" for update")
 	}
 
-	return sql
+	return sql.String()
 }
 
 func (p *queryModel) oracleIgnoreFormatSubSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string,
 	colData interface{}) string {
-	subSQL := ""
-	colName = "LOWER(" + colName + ")"
-	val = "LOWER(" + val + ")"
+	var subSQL strings.Builder
+	subSQL.Grow(20)
+
+	subSQL.WriteString("LOWER(")
+	subSQL.WriteString(colName)
+	subSQL.WriteByte(')')
 	switch colOperator {
 	case "eq":
-		subSQL = colName + "=" + val
+		subSQL.WriteString("=LOWER(")
 	case "lt":
-		subSQL = colName + "<" + val
+		subSQL.WriteString("<LOWER(")
 	case "lte":
-		subSQL = colName + "<=" + val
+		subSQL.WriteString("<=LOWER(")
 	case "gt":
-		subSQL = colName + ">" + val
+		subSQL.WriteString(">LOWER(")
 	case "gte":
-		subSQL = colName + ">=" + val
+		subSQL.WriteString(">=LOWER(")
 	case "ne":
-		subSQL = colName + "<>" + val
+		subSQL.WriteString("<>LOWER(")
 	case "in":
-		newVal := "(" + connectStrArr(rawStrArr, ",", "LOWER('", "')") + ")"
-		subSQL = colName + " in " + newVal
+		val = connectStrArr(rawStrArr, ",", "LOWER('", "')")
+		subSQL.WriteString(" in (")
 	case "nin":
-		newVal := "(" + connectStrArr(rawStrArr, ",", "LOWER('", "')") + ")"
-		subSQL = colName + " not in " + newVal
+		val = connectStrArr(rawStrArr, ",", "LOWER('", "')")
+		subSQL.WriteString(" not in (")
 	default:
-		subSQL = p.oracleIgnoreLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
+		return p.oracleIgnoreLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
 	}
-	return subSQL
+	subSQL.WriteString(val)
+	subSQL.WriteByte(')')
+	return subSQL.String()
 }
 
 func (p *queryModel) oracleIgnoreLikeSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string) string {
-	subSQL := ""
+	var subSQL strings.Builder
+	subSQL.Grow(20)
 	switch colOperator {
 	case "startswith":
 		if rawVal != "" {
-			subSQL = colName + " like LOWER('" + rawVal + "%')"
+			subSQL.WriteString("LOWER(")
+			subSQL.WriteString(colName)
+			subSQL.WriteString(") like LOWER('")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%')")
 		}
 	case "endswith":
 		if rawVal != "" {
-			subSQL = colName + " like LOWER('%" + rawVal + "')"
+			subSQL.WriteString("LOWER(")
+			subSQL.WriteString(colName)
+			subSQL.WriteString(") like LOWER('%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("')")
 		}
 	case "contains":
 		if rawVal != "" {
-			subSQL = colName + " like LOWER('%" + rawVal + "%')"
+			subSQL.WriteString("LOWER(")
+			subSQL.WriteString(colName)
+			subSQL.WriteString(") like LOWER('%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%')")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like LOWER('%" + v + "%')"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " and " + colName + " like LOWER('%" + v + "%')"
+					subSQL.WriteString(" and ")
 				}
+				subSQL.WriteString("LOWER(")
+				subSQL.WriteString(colName)
+				subSQL.WriteString(") like LOWER('%")
+				subSQL.WriteString(v)
+				subSQL.WriteString("%')")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "customlike":
 		if rawVal != "" {
-			subSQL = colName + " like LOWER('" + rawVal + "')"
+			subSQL.WriteString("LOWER(")
+			subSQL.WriteString(colName)
+			subSQL.WriteString(") like LOWER('")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("')")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like LOWER('" + v + "')"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " and " + colName + " like LOWER('" + v + "')"
+					subSQL.WriteString(" and ")
 				}
+				subSQL.WriteString("LOWER(")
+				subSQL.WriteString(colName)
+				subSQL.WriteString(") like LOWER('")
+				subSQL.WriteString(v)
+				subSQL.WriteString("')")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	default:
-		subSQL = p.oracleIgnoreOrLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
+		return p.oracleIgnoreOrLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
 	}
-	return subSQL
+	return subSQL.String()
 }
 
 func (p *queryModel) oracleIgnoreOrLikeSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string) string {
-	subSQL := ""
+	var subSQL strings.Builder
+	subSQL.Grow(20)
 	switch colOperator {
 	case "orstartswith":
 		if rawVal != "" {
-			subSQL = colName + " like LOWER('" + rawVal + "%')"
+			subSQL.WriteString("LOWER(")
+			subSQL.WriteString(colName)
+			subSQL.WriteString(") like LOWER('")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%')")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like LOWER('" + v + "%')"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " or " + colName + " like LOWER('" + v + "%')"
+					subSQL.WriteString(" or ")
 				}
+				subSQL.WriteString("LOWER(")
+				subSQL.WriteString(colName)
+				subSQL.WriteString(") like LOWER('")
+				subSQL.WriteString(v)
+				subSQL.WriteString("%')")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "orendswith":
 		if rawVal != "" {
-			subSQL = colName + " like LOWER('%" + rawVal + "')"
+			subSQL.WriteString("LOWER(")
+			subSQL.WriteString(colName)
+			subSQL.WriteString(") like LOWER('%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("')")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like LOWER('%" + v + "')"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " or " + colName + " like LOWER('%" + v + "')"
+					subSQL.WriteString(" or ")
 				}
+				subSQL.WriteString("LOWER(")
+				subSQL.WriteString(colName)
+				subSQL.WriteString(") like LOWER('%")
+				subSQL.WriteString(v)
+				subSQL.WriteString("')")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "orcontains":
 		if rawVal != "" {
-			subSQL = colName + " like LOWER('%" + rawVal + "%')"
+			subSQL.WriteString("LOWER(")
+			subSQL.WriteString(colName)
+			subSQL.WriteString(") like LOWER('%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%')")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like LOWER('%" + v + "%')"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " or " + colName + " like LOWER('%" + v + "%')"
+					subSQL.WriteString(" or ")
 				}
+				subSQL.WriteString("LOWER(")
+				subSQL.WriteString(colName)
+				subSQL.WriteString(") like LOWER('%")
+				subSQL.WriteString(v)
+				subSQL.WriteString("%')")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "orcustomlike":
 		if rawVal != "" {
-			subSQL = colName + " like LOWER('" + rawVal + "')"
+			subSQL.WriteString("LOWER(")
+			subSQL.WriteString(colName)
+			subSQL.WriteString(") like LOWER('")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("')")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " like LOWER('" + v + "')"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " or " + colName + " like LOWER('" + v + "')"
+					subSQL.WriteString(" or ")
 				}
+				subSQL.WriteString("LOWER(")
+				subSQL.WriteString(colName)
+				subSQL.WriteString(") like LOWER('")
+				subSQL.WriteString(v)
+				subSQL.WriteString("')")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	default:
 		panic("no definition")
 	}
-	return subSQL
+	return subSQL.String()
 }
 
 // orm
 func (orm *ORM) oracleInsertManySQL(dataList []interface{}, cols []string) (string, error) {
-	dbCore := orm.ref.getDBConf()
-	insertSQL := "insert all into "
-
 	if len(dataList) <= 0 {
 		return "", fmt.Errorf("insert data is nil")
 	}
 
-	newCols := make([]string, 0, len(cols))
-	for _, k := range cols {
-		err := globalVerifyObj.VerifyFieldName(k)
+	dbCore := orm.ref.getDBConf()
+	var insertSQL strings.Builder
+	insertSQL.Grow(len(dataList)*len(cols)*25 + 200)
+
+	insertSQL.WriteString("insert all")
+
+	var tableBuff strings.Builder
+	tableBuff.WriteString(dbCore.EscStart)
+	tableBuff.WriteString(orm.tableName)
+	tableBuff.WriteString(dbCore.EscEnd)
+	tableBuff.WriteByte('(')
+	for i := range cols {
+		err := globalVerifyObj.VerifyFieldName(cols[i])
 		if err != nil {
 			return "", err
 		}
-		newCols = append(newCols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
+		if i > 0 {
+			tableBuff.WriteByte(',')
+		}
+		tableBuff.WriteString(dbCore.EscStart)
+		tableBuff.WriteString(cols[i])
+		tableBuff.WriteString(dbCore.EscEnd)
 	}
-
-	tableAndField := dbCore.EscStart + orm.tableName + dbCore.EscEnd + "(" + util.JoinArr(newCols, ",") + ")"
-	insertSQL += tableAndField
+	tableBuff.WriteByte(')')
+	tableAndField := tableBuff.String()
 
 	typeErrStr := "type of insert data is []map[string]interface{} or []*struct or []struct"
 
-	var valArr []string
+	valArr := make([]string, 0, len(dataList))
 	for _, data := range dataList {
 		var valMap map[string]interface{}
 		switch data := data.(type) {
@@ -266,50 +372,55 @@ func (orm *ORM) oracleInsertManySQL(dataList []interface{}, cols []string) (stri
 			return "", fmt.Errorf("sql data is empty, please check it")
 		}
 
-		subVal := ""
-		for _, colName := range cols {
-			if v, ok := valMap[colName]; ok {
+		var subVal strings.Builder
+		for i := range cols {
+			if i > 0 {
+				subVal.WriteByte(',')
+			}
+			if v, ok := valMap[cols[i]]; ok {
 				val, timeEmpty := orm.formatValue(v)
-				if (colName == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
-					subVal += "null,"
+				if (cols[i] == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
+					subVal.WriteString("null")
 					continue
 				}
 
-				subVal += val + ","
-			} else if v, ok = valMap["#"+colName]; ok {
-				subVal += fmt.Sprintf("%v,", v)
+				subVal.WriteString(val)
+			} else if v, ok = valMap["#"+cols[i]]; ok {
+				subVal.WriteString(util.InterfaceToString(v))
 			} else {
-				subVal += "null,"
+				subVal.WriteString("null")
 			}
 		}
-		subVal = subVal[:len(subVal)-1]
-		valArr = append(valArr, tableAndField)
+		valArr = append(valArr, subVal.String())
 	}
 
 	if len(valArr) <= 0 {
 		return "", fmt.Errorf("insert data is empty")
 	}
 
-	dataSQL := ""
-	for i := 0; i < len(valArr)-1; i++ {
-		dataSQL += fmt.Sprintf(" into %s VALUES(%s)", tableAndField, valArr[i])
+	for i := 0; i < len(valArr); i++ {
+		insertSQL.WriteString(" into ")
+		insertSQL.WriteString(tableAndField)
+		insertSQL.WriteString(" VALUES(")
+		insertSQL.WriteString(valArr[i])
+		insertSQL.WriteByte(')')
 	}
 
-	insertSQL += dataSQL + " select " + valArr[len(valArr)-1] + " from \"DUAL\""
-	return insertSQL, nil
+	insertSQL.WriteString(" select * from \"DUAL\"")
+	return insertSQL.String(), nil
 }
 
 func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
-	dbCore := orm.ref.getDBConf()
-
 	if data == nil {
 		return "", fmt.Errorf("upsert data is nil")
 	}
 
-	typeErrStr := "type of upsert data is []map[string]interface{} or []*struct or []struct"
-	var cols []string
-	colSet := set.New[string]()
-	var values []string
+	dbCore := orm.ref.getDBConf()
+	escLen := len(dbCore.EscStart) + len(dbCore.EscEnd)
+
+	typeErrStr := "type of upsert data is map[string]interface{} or *struct or struct"
+	var formatCols []string
+	rawColSet := set.New[string]()
 	var rawVal []string
 
 	switch data := data.(type) {
@@ -321,11 +432,17 @@ func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
 				if err != nil {
 					return "", err
 				}
-				formatKey := fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd)
-				cols = append(cols, formatKey)
-				colSet.Add(k)
-				values = append(values, fmt.Sprintf("%v as %s", v, formatKey))
-				rawVal = append(rawVal, fmt.Sprintf("%v", v))
+				var formatKey strings.Builder
+				formatKey.Grow(escLen + len(k))
+				formatKey.WriteString(dbCore.EscStart)
+				formatKey.WriteString(k)
+				formatKey.WriteString(dbCore.EscEnd)
+
+				formatCols = append(formatCols, formatKey.String())
+				rawColSet.Add(k)
+
+				val := util.InterfaceToString(v)
+				rawVal = append(rawVal, val)
 				continue
 			}
 
@@ -341,10 +458,14 @@ func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
 			if timeEmpty {
 				continue
 			}
-			formatKey := fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd)
-			cols = append(cols, formatKey)
-			colSet.Add(k)
-			values = append(values, fmt.Sprintf("%s as %s", val, formatKey))
+			var formatKey strings.Builder
+			formatKey.Grow(escLen + len(k))
+			formatKey.WriteString(dbCore.EscStart)
+			formatKey.WriteString(k)
+			formatKey.WriteString(dbCore.EscEnd)
+
+			formatCols = append(formatCols, formatKey.String())
+			rawColSet.Add(k)
 			rawVal = append(rawVal, val)
 		}
 	default:
@@ -375,79 +496,164 @@ func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
 			if timeEmpty {
 				continue
 			}
-			formatKey := fmt.Sprintf("%s%s%s", dbCore.EscStart, colName, dbCore.EscEnd)
-			cols = append(cols, formatKey)
-			colSet.Add(colName)
-			values = append(values, fmt.Sprintf("%s as %s", val, formatKey))
+
+			var formatKey strings.Builder
+			formatKey.Grow(escLen + len(colName))
+			formatKey.WriteString(dbCore.EscStart)
+			formatKey.WriteString(colName)
+			formatKey.WriteString(dbCore.EscEnd)
+
+			formatCols = append(formatCols, formatKey.String())
+			rawColSet.Add(colName)
 			rawVal = append(rawVal, val)
 		}
 	}
-	if len(cols) <= 0 || len(values) <= 0 {
+	if len(formatCols) <= 0 {
 		return "", fmt.Errorf("sql data is empty, please check it")
 	}
 
-	hasPK := colSet.Has(orm.primaryKey)
+	hasPK := rawColSet.Has(orm.primaryKey)
 	hasUK := false
 	if !hasPK {
-		hasUK = orm.checkUK(colSet)
+		hasUK = orm.checkUK(rawColSet)
 	}
 
-	var update []string
+	if hasPK || hasUK {
+		var upsertSQL strings.Builder
+		upsertSQL.Grow(len(formatCols)*10 + 100)
 
-	upsertSQL := "MERGE INTO " + dbCore.EscStart + "%s" + dbCore.EscEnd + " \"T\" " +
-		"USING (%s) \"S\" ON (%s) WHEN MATCHED THEN " +
-		"UPDATE SET %s " +
-		"WHEN NOT MATCHED THEN " +
-		"INSERT(%s) VALUES(%s)"
-	if hasPK {
-		for i := range cols {
-			if dbCore.EscStart+orm.primaryKey+dbCore.EscEnd == cols[i] {
-				continue
+		upsertSQL.WriteString("MERGE INTO ")
+		upsertSQL.WriteString(dbCore.EscStart)
+		upsertSQL.WriteString(orm.tableName)
+		upsertSQL.WriteString(dbCore.EscEnd)
+		upsertSQL.WriteString(" \"T\" USING (SELECT ")
+		for i := range formatCols {
+			if i > 0 {
+				upsertSQL.WriteByte(',')
 			}
-			update = append(update, fmt.Sprintf("\"T\".%s=\"S\".%s", cols[i], cols[i]))
+			upsertSQL.WriteString(rawVal[i])
+			upsertSQL.WriteString(" as ")
+			upsertSQL.WriteString(formatCols[i])
 		}
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, "SELECT "+util.JoinArr(values, ",")+" from \"DUAL\"",
-			fmt.Sprintf("\"T\".%s%s%s=\"S\".%s%s%s",
-				dbCore.EscStart, orm.primaryKey, dbCore.EscEnd,
-				dbCore.EscStart, orm.primaryKey, dbCore.EscEnd),
-			util.JoinArr(update, ","), util.JoinArr(cols, ","), connectStrArr(cols, ",", "\"S\".", ""))
-	} else if hasUK {
-		var onList []string
-		orm.uniqueKeys.Range(func(item string) bool {
-			onList = append(onList, fmt.Sprintf("\"T\".%s%s%s=\"S\".%s%s%s",
-				dbCore.EscStart, item, dbCore.EscEnd,
-				dbCore.EscStart, item, dbCore.EscEnd))
-			return true
-		})
-		for i := range cols {
-			k := cols[i]
-			if orm.uniqueKeys.Has(k[len(dbCore.EscStart) : len(k)-len(dbCore.EscEnd)]) {
-				continue
+		upsertSQL.WriteString(" from \"DUAL\") \"S\" ON (")
+
+		if hasPK {
+			upsertSQL.WriteString("\"T\".")
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(orm.primaryKey)
+			upsertSQL.WriteString(dbCore.EscEnd)
+			upsertSQL.WriteString("=\"S\".")
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(orm.primaryKey)
+			upsertSQL.WriteString(dbCore.EscEnd)
+		} else {
+			var onStrBuff strings.Builder
+			onStrBuff.Grow(orm.uniqueKeys.Size() * (escLen + 6 + 10))
+			orm.uniqueKeys.Range(func(item string) bool {
+				if onStrBuff.Len() > 0 {
+					onStrBuff.WriteString(" and ")
+				}
+
+				onStrBuff.WriteString("\"T\".")
+				onStrBuff.WriteString(dbCore.EscStart)
+				onStrBuff.WriteString(item)
+				onStrBuff.WriteString(dbCore.EscEnd)
+				onStrBuff.WriteString("=\"S\".")
+				onStrBuff.WriteString(dbCore.EscStart)
+				onStrBuff.WriteString(item)
+				onStrBuff.WriteString(dbCore.EscEnd)
+				return true
+			})
+			upsertSQL.WriteString(onStrBuff.String())
+		}
+		upsertSQL.WriteString(") WHEN MATCHED THEN UPDATE SET ")
+		if hasPK {
+			has := false
+			formatPK := dbCore.EscStart + orm.primaryKey + dbCore.EscEnd
+			for i := range formatCols {
+				if formatPK == formatCols[i] {
+					continue
+				}
+
+				if has {
+					upsertSQL.WriteByte(',')
+				}
+				has = true
+
+				upsertSQL.WriteString("\"T\".")
+				upsertSQL.WriteString(formatCols[i])
+				upsertSQL.WriteString("=\"S\".")
+				upsertSQL.WriteString(formatCols[i])
 			}
-			update = append(update, fmt.Sprintf("\"T\".%s=\"S\".%s", k, k))
+		} else {
+			has := false
+			for i := range formatCols {
+				k := formatCols[i]
+				if orm.uniqueKeys.Has(k[len(dbCore.EscStart) : len(k)-len(dbCore.EscEnd)]) {
+					continue
+				}
+
+				if has {
+					upsertSQL.WriteByte(',')
+				}
+				has = true
+
+				upsertSQL.WriteString("\"T\".")
+				upsertSQL.WriteString(formatCols[i])
+				upsertSQL.WriteString("=\"S\".")
+				upsertSQL.WriteString(formatCols[i])
+			}
 		}
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, "SELECT "+util.JoinArr(values, ",")+" from \"DUAL\"",
-			util.JoinArr(onList, " and "),
-			util.JoinArr(update, ","), util.JoinArr(cols, ","), connectStrArr(cols, ",", "\"S\".", ""))
-	} else {
-		upsertSQL = "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values(%s)"
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(cols, ","), util.JoinArr(rawVal, ","))
+		upsertSQL.WriteString(" WHEN NOT MATCHED THEN INSERT(")
+		upsertSQL.WriteString(util.JoinArr(formatCols, ","))
+		upsertSQL.WriteString(" VALUES(")
+		upsertSQL.WriteString(connectStrArr(formatCols, ",", "\"S\".", ""))
+		upsertSQL.WriteByte(')')
+		return upsertSQL.String(), nil
 	}
 
-	return upsertSQL, nil
+	var upsertSQL strings.Builder
+	upsertSQL.WriteString("insert into ")
+	upsertSQL.WriteString(dbCore.EscStart)
+	upsertSQL.WriteString(orm.tableName)
+	upsertSQL.WriteString(dbCore.EscEnd)
+	upsertSQL.WriteByte('(')
+	upsertSQL.WriteString(util.JoinArr(formatCols, ","))
+	upsertSQL.WriteString(") VALUES(")
+	upsertSQL.WriteString(util.JoinArr(rawVal, ","))
+	upsertSQL.WriteByte(')')
+	return upsertSQL.String(), nil
 }
 
 func (orm *ORM) oracleUpsertManySQL(dataList []interface{}, cols []string) (string, error) {
-	dbCore := orm.ref.getDBConf()
-
 	if len(dataList) <= 0 {
 		return "", fmt.Errorf("upsert data is nil")
 	}
 
+	dbCore := orm.ref.getDBConf()
+	escLen := len(dbCore.EscStart) + len(dbCore.EscEnd)
+
 	typeErrStr := "type of upsert data is []map[string]interface{} or []*struct or []struct"
 
-	var valArr []string
-	var rawVal []string
+	formatCols := make([]string, 0, len(cols))
+	for _, k := range cols {
+		err := globalVerifyObj.VerifyFieldName(k)
+		if err != nil {
+			return "", err
+		}
+		var formatKey strings.Builder
+		formatKey.Grow(escLen + len(k))
+		formatKey.WriteString(dbCore.EscStart)
+		formatKey.WriteString(k)
+		formatKey.WriteString(dbCore.EscEnd)
+
+		formatCols = append(formatCols, formatKey.String())
+	}
+
+	rawColSet := set.New[string]()
+	rawColSet.Add(cols...)
+
+	rawVal := make([][]string, 0, len(dataList))
 	for _, data := range dataList {
 		var valMap map[string]interface{}
 		switch data := data.(type) {
@@ -483,103 +689,174 @@ func (orm *ORM) oracleUpsertManySQL(dataList []interface{}, cols []string) (stri
 			return "", fmt.Errorf("sql data is empty, please check it")
 		}
 
-		subVal := "SELECT "
-		subStr := "("
+		subVal := make([]string, 0, len(cols))
 		for _, colName := range cols {
-			formatKey := fmt.Sprintf("%s%s%s", dbCore.EscStart, colName, dbCore.EscEnd)
 			if v, ok := valMap[colName]; ok {
 				val, timeEmpty := orm.formatValue(v)
 				if (colName == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
-					subVal += "null as " + formatKey + ","
-					subStr += "null,"
+					subVal = append(subVal, "null")
 					continue
 				}
 
-				subVal += val + " as " + formatKey + ","
-				subStr += val + ","
+				subVal = append(subVal, val)
 			} else if v, ok = valMap["#"+colName]; ok {
-				subVal += fmt.Sprintf("%v as %s,", v, formatKey)
-				subStr += fmt.Sprintf("%v", v)
+				subVal = append(subVal, util.InterfaceToString(v))
 			} else {
-				subVal += "null as " + formatKey + ","
-				subStr += "null,"
+				subVal = append(subVal, "null")
 			}
 		}
-		subVal = subVal[:len(subVal)-1] + " from \"DUAL\""
-		subStr = subStr[:len(subStr)-1] + ")"
-		valArr = append(valArr, subVal)
-		rawVal = append(rawVal, subStr)
+		rawVal = append(rawVal, subVal)
 	}
 
-	if len(valArr) <= 0 {
+	if len(rawVal) <= 0 {
 		return "", fmt.Errorf("upsert data is empty")
 	}
 
-	newCols := make([]string, 0, len(cols))
-
-	for _, k := range cols {
-		err := globalVerifyObj.VerifyFieldName(k)
-		if err != nil {
-			return "", err
-		}
-		formatKey := fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd)
-		newCols = append(newCols, formatKey)
-	}
-
-	colSet := set.New[string]()
-	colSet.Add(cols...)
-
-	hasPK := colSet.Has(orm.primaryKey)
+	hasPK := rawColSet.Has(orm.primaryKey)
 	hasUK := false
 	if !hasPK {
-		hasUK = orm.checkUK(colSet)
+		hasUK = orm.checkUK(rawColSet)
 	}
 
-	updateCols := make([]string, 0, len(newCols))
-
-	upsertSQL := "MERGE INTO " + dbCore.EscStart + "%s" + dbCore.EscEnd + " \"T\" " +
-		"USING (%s) \"S\" ON (%s) WHEN MATCHED THEN " +
-		"UPDATE SET %s " +
-		"WHEN NOT MATCHED THEN " +
-		"INSERT(%s) VALUES(%s)"
 	unionStr := " UNION "
 	if orm.oracleMergeUnionAll {
 		unionStr = " UNION ALL "
 	}
-	if hasPK {
-		for i := range newCols {
-			if dbCore.EscStart+orm.primaryKey+dbCore.EscEnd == newCols[i] {
-				continue
+	if hasPK || hasUK {
+		var upsertSQL strings.Builder
+		upsertSQL.Grow(len(formatCols)*10 + 100)
+
+		upsertSQL.WriteString("MERGE INTO ")
+		upsertSQL.WriteString(dbCore.EscStart)
+		upsertSQL.WriteString(orm.tableName)
+		upsertSQL.WriteString(dbCore.EscEnd)
+		upsertSQL.WriteString(" \"T\" USING (")
+		for index := range rawVal {
+			if index > 0 {
+				upsertSQL.WriteString(unionStr)
 			}
-			updateCols = append(updateCols, fmt.Sprintf("\"T\".%s=\"S\".%s", newCols[i], newCols[i]))
-		}
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(valArr, unionStr),
-			fmt.Sprintf("\"T\".%s%s%s=\"S\".%s%s%s",
-				dbCore.EscStart, orm.primaryKey, dbCore.EscEnd,
-				dbCore.EscStart, orm.primaryKey, dbCore.EscEnd),
-			util.JoinArr(updateCols, ","), util.JoinArr(newCols, ","), connectStrArr(newCols, ",", "\"S\".", ""))
-	} else if hasUK {
-		var onList []string
-		orm.uniqueKeys.Range(func(item string) bool {
-			onList = append(onList, fmt.Sprintf("\"T\".%s%s%s=\"S\".%s%s%s",
-				dbCore.EscStart, item, dbCore.EscEnd,
-				dbCore.EscStart, item, dbCore.EscEnd))
-			return true
-		})
-		for i := range newCols {
-			k := newCols[i]
-			if orm.uniqueKeys.Has(k[len(dbCore.EscStart) : len(k)-len(dbCore.EscEnd)]) {
-				continue
+			upsertSQL.WriteString("SELECT ")
+			for i := range formatCols {
+				if i > 0 {
+					upsertSQL.WriteByte(',')
+				}
+				upsertSQL.WriteString(rawVal[index][i])
+				upsertSQL.WriteString(" as ")
+				upsertSQL.WriteString(formatCols[i])
 			}
-			updateCols = append(updateCols, fmt.Sprintf("\"T\".%s=\"S\".%s", k, k))
+			upsertSQL.WriteString(" from \"DUAL\"")
 		}
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(valArr, unionStr),
-			util.JoinArr(onList, " and "),
-			util.JoinArr(updateCols, ","), util.JoinArr(newCols, ","), connectStrArr(newCols, ",", "\"S\".", ""))
-	} else {
-		upsertSQL = "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values%s"
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(rawVal, ","))
+
+		upsertSQL.WriteString(") \"S\" ON (")
+
+		if hasPK {
+			upsertSQL.WriteString("\"T\".")
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(orm.primaryKey)
+			upsertSQL.WriteString(dbCore.EscEnd)
+			upsertSQL.WriteString("=\"S\".")
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(orm.primaryKey)
+			upsertSQL.WriteString(dbCore.EscEnd)
+		} else {
+			var onStrBuff strings.Builder
+			onStrBuff.Grow(orm.uniqueKeys.Size() * (escLen + 6 + 10))
+			orm.uniqueKeys.Range(func(item string) bool {
+				if onStrBuff.Len() > 0 {
+					onStrBuff.WriteString(" and ")
+				}
+
+				onStrBuff.WriteString("\"T\".")
+				onStrBuff.WriteString(dbCore.EscStart)
+				onStrBuff.WriteString(item)
+				onStrBuff.WriteString(dbCore.EscEnd)
+				onStrBuff.WriteString("=\"S\".")
+				onStrBuff.WriteString(dbCore.EscStart)
+				onStrBuff.WriteString(item)
+				onStrBuff.WriteString(dbCore.EscEnd)
+				return true
+			})
+			upsertSQL.WriteString(onStrBuff.String())
+		}
+		upsertSQL.WriteString(") WHEN MATCHED THEN UPDATE SET ")
+		if hasPK {
+			has := false
+			formatPK := dbCore.EscStart + orm.primaryKey + dbCore.EscEnd
+			for i := range formatCols {
+				if formatPK == formatCols[i] {
+					continue
+				}
+
+				if has {
+					upsertSQL.WriteByte(',')
+				}
+				has = true
+
+				upsertSQL.WriteString("\"T\".")
+				upsertSQL.WriteString(formatCols[i])
+				upsertSQL.WriteString("=\"S\".")
+				upsertSQL.WriteString(formatCols[i])
+			}
+		} else {
+			has := false
+			for i := range formatCols {
+				k := formatCols[i]
+				if orm.uniqueKeys.Has(k[len(dbCore.EscStart) : len(k)-len(dbCore.EscEnd)]) {
+					continue
+				}
+
+				if has {
+					upsertSQL.WriteByte(',')
+				}
+				has = true
+
+				upsertSQL.WriteString("\"T\".")
+				upsertSQL.WriteString(formatCols[i])
+				upsertSQL.WriteString("=\"S\".")
+				upsertSQL.WriteString(formatCols[i])
+			}
+		}
+		upsertSQL.WriteString(" WHEN NOT MATCHED THEN INSERT(")
+		upsertSQL.WriteString(util.JoinArr(formatCols, ","))
+		upsertSQL.WriteString(" VALUES(")
+		upsertSQL.WriteString(connectStrArr(formatCols, ",", "\"S\".", ""))
+		upsertSQL.WriteByte(')')
+		return upsertSQL.String(), nil
 	}
 
-	return upsertSQL, nil
+	var insertSQL strings.Builder
+	insertSQL.Grow(len(rawVal)*len(cols)*25 + 200)
+
+	insertSQL.WriteString("insert all")
+
+	var tableBuff strings.Builder
+	tableBuff.Grow(len(rawVal)*len(cols)*5 + 100)
+	tableBuff.WriteString(dbCore.EscStart)
+	tableBuff.WriteString(orm.tableName)
+	tableBuff.WriteString(dbCore.EscEnd)
+	tableBuff.WriteByte('(')
+	for i := range formatCols {
+		if i > 0 {
+			tableBuff.WriteByte(',')
+		}
+		tableBuff.WriteString(formatCols[i])
+	}
+	tableBuff.WriteByte(')')
+	tableAndField := tableBuff.String()
+
+	for i := 0; i < len(rawVal); i++ {
+		insertSQL.WriteString(" into ")
+		insertSQL.WriteString(tableAndField)
+		insertSQL.WriteString(" VALUES(")
+		for j := 0; j < len(rawVal[i]); j++ {
+			if j > 0 {
+				insertSQL.WriteByte(',')
+			}
+			insertSQL.WriteString(rawVal[i][j])
+		}
+		insertSQL.WriteByte(')')
+	}
+
+	insertSQL.WriteString(" select * from \"DUAL\"")
+	return insertSQL.String(), nil
 }

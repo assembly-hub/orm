@@ -3,205 +3,313 @@ package orm
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
 )
 
 func (p *queryModel) querySQLite() string {
-	sql := "select "
+	var sql strings.Builder
+	sql.Grow(100)
+	sql.WriteString("select ")
+
 	sel := p.selectSQL()
 	if p.MainTable == "" {
 		panic("MainTable is nil")
 	}
+
+	sql.WriteString(sel)
+	sql.WriteString(" from ")
+	sql.WriteString(p.MainTable)
 	if p.MainAlias != "" {
-		sql += sel + " from " + p.MainTable + " as " + p.MainAlias
-	} else {
-		sql += sel + " from " + p.MainTable
+		sql.WriteString(" as ")
+		sql.WriteString(p.MainAlias)
 	}
 
 	join := p.joinSQL()
 	if join != "" {
-		sql += join
+		sql.WriteString(join)
 	}
 
 	where := p.andSQL(p.Where)
 	if where != "" {
-		sql += " where " + where
+		sql.WriteString(" where ")
+		sql.WriteString(where)
 	}
 
 	if len(p.GroupBy) > 0 {
-		sql += " group by " + util.JoinArr(p.GroupBy, ",")
+		sql.WriteString(" group by ")
+		sql.WriteString(util.JoinArr(p.GroupBy, ","))
 	}
 
 	if len(p.GroupBy) > 0 && len(p.Having) > 0 {
-		sql += " having " + p.andSQL(p.Having)
+		sql.WriteString(" having ")
+		sql.WriteString(p.andSQL(p.Having))
 	}
 
 	order := p.orderSQL()
 	if order != "" {
-		sql += " order by " + order
+		sql.WriteString(" order by ")
+		sql.WriteString(order)
 	}
 
 	if len(p.Limit) == 1 {
-		sql += " limit " + util.IntToStr(int64(p.Limit[0]))
+		sql.WriteString(" limit ")
+		sql.WriteString(util.UintToStr(p.Limit[0]))
 	} else if len(p.Limit) == 2 {
-		sql += fmt.Sprintf(" limit %d offset %d", p.Limit[1], p.Limit[0])
+		sql.WriteString(" limit ")
+		sql.WriteString(util.UintToStr(p.Limit[1]))
+		sql.WriteString(" offset ")
+		sql.WriteString(util.UintToStr(p.Limit[0]))
 	}
 
 	//if p.SelectForUpdate {
 	//	sql += " for update"
 	//}
 
-	return sql
+	return sql.String()
 }
 
 func (p *queryModel) sqliteIgnoreFormatSubSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string,
 	colData interface{}) string {
-	subSQL := ""
+	var subSQL strings.Builder
+	subSQL.Grow(20)
+	subSQL.WriteString(colName)
+	subSQL.WriteByte(' ')
+	subSQL.WriteString(p.DBCore.IgnoreStr)
 	switch colOperator {
 	case "eq":
-		subSQL = colName + " " + p.DBCore.IgnoreStr + " =" + val
+		subSQL.WriteString(" =")
 	case "lt":
-		subSQL = colName + " " + p.DBCore.IgnoreStr + " <" + val
+		subSQL.WriteString(" <")
 	case "lte":
-		subSQL = colName + " " + p.DBCore.IgnoreStr + " <=" + val
+		subSQL.WriteString(" <=")
 	case "gt":
-		subSQL = colName + " " + p.DBCore.IgnoreStr + " >" + val
+		subSQL.WriteString(" >")
 	case "gte":
-		subSQL = colName + " " + p.DBCore.IgnoreStr + " >=" + val
+		subSQL.WriteString(" >=")
 	case "ne":
-		subSQL = colName + " " + p.DBCore.IgnoreStr + " <>" + val
+		subSQL.WriteString(" <>")
 	case "in":
-		subSQL = colName + " " + p.DBCore.IgnoreStr + " in " + val
+		subSQL.WriteString(" in ")
 	case "nin":
-		subSQL = colName + " " + p.DBCore.IgnoreStr + " not in " + val
+		subSQL.WriteString(" not in ")
 	default:
-		subSQL = p.sqliteIgnoreLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
+		return p.sqliteIgnoreLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
 	}
-	return subSQL
+	subSQL.WriteString(val)
+	return subSQL.String()
 }
 
 func (p *queryModel) sqliteIgnoreLikeSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string) string {
-	subSQL := ""
+	var subSQL strings.Builder
+	subSQL.Grow(20)
 	switch colOperator {
 	case "startswith":
 		if rawVal != "" {
-			subSQL = colName + " " + p.DBCore.IgnoreStr + " like '" + rawVal + "%'"
+			subSQL.WriteString(colName)
+			subSQL.WriteByte(' ')
+			subSQL.WriteString(p.DBCore.IgnoreStr)
+			subSQL.WriteString(" like '")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%'")
 		}
 	case "endswith":
 		if rawVal != "" {
-			subSQL = colName + " " + p.DBCore.IgnoreStr + " like '%" + rawVal + "'"
+			subSQL.WriteString(colName)
+			subSQL.WriteByte(' ')
+			subSQL.WriteString(p.DBCore.IgnoreStr)
+			subSQL.WriteString(" like '%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("'")
 		}
 	case "contains":
 		if rawVal != "" {
-			subSQL = colName + " " + p.DBCore.IgnoreStr + " like '%" + rawVal + "%'"
+			subSQL.WriteString(colName)
+			subSQL.WriteByte(' ')
+			subSQL.WriteString(p.DBCore.IgnoreStr)
+			subSQL.WriteString(" like '%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%'")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " " + p.DBCore.IgnoreStr + " like '%" + v + "%'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " and " + colName + " " + p.DBCore.IgnoreStr + " like '%" + v + "%'"
+					subSQL.WriteString(" and ")
 				}
+				subSQL.WriteString(colName)
+				subSQL.WriteByte(' ')
+				subSQL.WriteString(p.DBCore.IgnoreStr)
+				subSQL.WriteString(" like '%")
+				subSQL.WriteString(v)
+				subSQL.WriteString("%'")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "customlike":
 		if rawVal != "" {
-			subSQL = colName + " " + p.DBCore.IgnoreStr + " like '" + rawVal + "'"
+			subSQL.WriteString(colName)
+			subSQL.WriteByte(' ')
+			subSQL.WriteString(p.DBCore.IgnoreStr)
+			subSQL.WriteString(" like '")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("'")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " " + p.DBCore.IgnoreStr + " like '" + v + "'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " and " + colName + " " + p.DBCore.IgnoreStr + " like '" + v + "'"
+					subSQL.WriteString(" and ")
 				}
+				subSQL.WriteString(colName)
+				subSQL.WriteByte(' ')
+				subSQL.WriteString(p.DBCore.IgnoreStr)
+				subSQL.WriteString(" like '")
+				subSQL.WriteString(v)
+				subSQL.WriteString("'")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	default:
-		subSQL = p.sqliteIgnoreOrLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
+		return p.sqliteIgnoreOrLikeSQL(colOperator, colName, val, rawVal, rawStrArr)
 	}
-	return subSQL
+	return subSQL.String()
 }
 
 func (p *queryModel) sqliteIgnoreOrLikeSQL(colOperator string, colName string, val, rawVal string, rawStrArr []string) string {
-	subSQL := ""
+	var subSQL strings.Builder
+	subSQL.Grow(20)
 	switch colOperator {
 	case "orstartswith":
 		if rawVal != "" {
-			subSQL = colName + " " + p.DBCore.IgnoreStr + " like '" + rawVal + "%'"
+			subSQL.WriteString(colName)
+			subSQL.WriteByte(' ')
+			subSQL.WriteString(p.DBCore.IgnoreStr)
+			subSQL.WriteString(" like '")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%'")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " " + p.DBCore.IgnoreStr + " like '" + v + "%'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " or " + colName + " " + p.DBCore.IgnoreStr + " like '" + v + "%'"
+					subSQL.WriteString(" or ")
 				}
+				subSQL.WriteString(colName)
+				subSQL.WriteByte(' ')
+				subSQL.WriteString(p.DBCore.IgnoreStr)
+				subSQL.WriteString(" like '")
+				subSQL.WriteString(v)
+				subSQL.WriteString("%'")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "orendswith":
 		if rawVal != "" {
-			subSQL = colName + " " + p.DBCore.IgnoreStr + " like '%" + rawVal + "'"
+			subSQL.WriteString(colName)
+			subSQL.WriteByte(' ')
+			subSQL.WriteString(p.DBCore.IgnoreStr)
+			subSQL.WriteString(" like '%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("'")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " " + p.DBCore.IgnoreStr + " like '%" + v + "'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " or " + colName + " " + p.DBCore.IgnoreStr + " like '%" + v + "'"
+					subSQL.WriteString(" or ")
 				}
+				subSQL.WriteString(colName)
+				subSQL.WriteByte(' ')
+				subSQL.WriteString(p.DBCore.IgnoreStr)
+				subSQL.WriteString(" like '%")
+				subSQL.WriteString(v)
+				subSQL.WriteString("'")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "orcontains":
 		if rawVal != "" {
-			subSQL = colName + " " + p.DBCore.IgnoreStr + " like '%" + rawVal + "%'"
+			subSQL.WriteString(colName)
+			subSQL.WriteByte(' ')
+			subSQL.WriteString(p.DBCore.IgnoreStr)
+			subSQL.WriteString(" like '%")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("%'")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " " + p.DBCore.IgnoreStr + " like '%" + v + "%'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " or " + colName + " " + p.DBCore.IgnoreStr + " like '%" + v + "%'"
+					subSQL.WriteString(" or ")
 				}
+				subSQL.WriteString(colName)
+				subSQL.WriteByte(' ')
+				subSQL.WriteString(p.DBCore.IgnoreStr)
+				subSQL.WriteString(" like '%")
+				subSQL.WriteString(v)
+				subSQL.WriteString("%'")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	case "orcustomlike":
 		if rawVal != "" {
-			subSQL = colName + " " + p.DBCore.IgnoreStr + " like '" + rawVal + "'"
+			subSQL.WriteString(colName)
+			subSQL.WriteByte(' ')
+			subSQL.WriteString(p.DBCore.IgnoreStr)
+			subSQL.WriteString(" like '")
+			subSQL.WriteString(rawVal)
+			subSQL.WriteString("'")
 		} else if len(rawStrArr) > 0 {
 			for _, v := range rawStrArr {
-				if subSQL == "" {
-					subSQL = "(" + colName + " " + p.DBCore.IgnoreStr + " like '" + v + "'"
+				if subSQL.Len() <= 0 {
+					subSQL.WriteByte('(')
 				} else {
-					subSQL += " or " + colName + " " + p.DBCore.IgnoreStr + " like '" + v + "'"
+					subSQL.WriteString(" or ")
 				}
+				subSQL.WriteString(colName)
+				subSQL.WriteByte(' ')
+				subSQL.WriteString(p.DBCore.IgnoreStr)
+				subSQL.WriteString(" like '")
+				subSQL.WriteString(v)
+				subSQL.WriteString("'")
 			}
-			subSQL += ")"
+			subSQL.WriteByte(')')
 		}
 	default:
 		panic("no definition")
 	}
-	return subSQL
+	return subSQL.String()
 }
 
 // orm
 func (orm *ORM) sqliteUpsertSQL(data interface{}) (string, error) {
 	dbCore := orm.ref.getDBConf()
+	escLen := len(dbCore.EscStart) + len(dbCore.EscEnd)
+
+	var upsertSQL strings.Builder
+	upsertSQL.Grow(100)
+	upsertSQL.WriteString("insert into ")
+	upsertSQL.WriteString(dbCore.EscStart)
+	upsertSQL.WriteString(orm.tableName)
+	upsertSQL.WriteString(dbCore.EscEnd)
+	upsertSQL.WriteByte('(')
 
 	if data == nil {
-		return "", fmt.Errorf("upsert data is nil")
+		return "", fmt.Errorf("insert data is nil")
 	}
 
-	typeErrStr := "type of upsert data is []map[string]interface{} or []*struct or []struct"
-	var cols []string
-	colSet := set.New[string]()
+	typeErrStr := "type of upsert data is map[string]interface{} or *struct or struct"
+	var formatCols []string
 	var values []string
-	var update []string
+	colSet := set.New[string]()
 
 	switch data := data.(type) {
 	case map[string]interface{}:
+		formatCols = make([]string, 0, len(data))
+		values = make([]string, 0, len(data))
 		for k, v := range data {
 			if k[0] == '#' {
 				k = k[1:]
@@ -209,12 +317,15 @@ func (orm *ORM) sqliteUpsertSQL(data interface{}) (string, error) {
 				if err != nil {
 					return "", err
 				}
-				cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
+				var formatKey strings.Builder
+				formatKey.Grow(escLen + len(k))
+				formatKey.WriteString(dbCore.EscStart)
+				formatKey.WriteString(k)
+				formatKey.WriteString(dbCore.EscEnd)
+
 				colSet.Add(k)
-				values = append(values, fmt.Sprintf("%v", v))
-				update = append(update, fmt.Sprintf("%s%s%s=EXCLUDED.%s%s%s",
-					dbCore.EscStart, k, dbCore.EscEnd,
-					dbCore.EscStart, k, dbCore.EscEnd))
+				formatCols = append(formatCols, formatKey.String())
+				values = append(values, util.InterfaceToString(v))
 				continue
 			}
 
@@ -230,13 +341,16 @@ func (orm *ORM) sqliteUpsertSQL(data interface{}) (string, error) {
 			if timeEmpty {
 				continue
 			} else {
-				cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
+				var formatKey strings.Builder
+				formatKey.Grow(escLen + len(k))
+				formatKey.WriteString(dbCore.EscStart)
+				formatKey.WriteString(k)
+				formatKey.WriteString(dbCore.EscEnd)
+
 				colSet.Add(k)
+				formatCols = append(formatCols, formatKey.String())
 				values = append(values, val)
 			}
-			update = append(update, fmt.Sprintf("%s%s%s=EXCLUDED.%s%s%s",
-				dbCore.EscStart, k, dbCore.EscEnd,
-				dbCore.EscStart, k, dbCore.EscEnd))
 		}
 	default:
 		dataValue := reflect.ValueOf(data)
@@ -259,6 +373,11 @@ func (orm *ORM) sqliteUpsertSQL(data interface{}) (string, error) {
 				continue
 			}
 
+			err := globalVerifyObj.VerifyFieldName(colName)
+			if err != nil {
+				return "", err
+			}
+
 			val, timeEmpty := orm.formatValue(dataValue.Field(i).Interface())
 			if colName == orm.primaryKey && (val == "" || val == "0") {
 				continue
@@ -266,16 +385,19 @@ func (orm *ORM) sqliteUpsertSQL(data interface{}) (string, error) {
 			if timeEmpty {
 				continue
 			} else {
-				cols = append(cols, fmt.Sprintf("%s%s%s", dbCore.EscStart, colName, dbCore.EscEnd))
+				var formatKey strings.Builder
+				formatKey.Grow(escLen + len(colName))
+				formatKey.WriteString(dbCore.EscStart)
+				formatKey.WriteString(colName)
+				formatKey.WriteString(dbCore.EscEnd)
+
 				colSet.Add(colName)
+				formatCols = append(formatCols, formatKey.String())
 				values = append(values, val)
 			}
-			update = append(update, fmt.Sprintf("%s%s%s=EXCLUDED.%s%s%s",
-				dbCore.EscStart, colName, dbCore.EscEnd,
-				dbCore.EscStart, colName, dbCore.EscEnd))
 		}
 	}
-	if len(cols) <= 0 || len(values) <= 0 {
+	if len(formatCols) <= 0 || len(values) <= 0 {
 		return "", fmt.Errorf("sql data is empty, please check it")
 	}
 
@@ -285,34 +407,85 @@ func (orm *ORM) sqliteUpsertSQL(data interface{}) (string, error) {
 		hasUK = orm.checkUK(colSet)
 	}
 
-	upsertSQL := "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values(%s) " +
-		"ON conflict(%s) DO update set %s"
-	if hasPK {
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(cols, ","),
-			util.JoinArr(values, ","), orm.primaryKey, util.JoinArr(update, ","))
-	} else if hasUK {
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(cols, ","),
-			util.JoinArr(values, ","),
-			connectStrArr(orm.uniqueKeys.ToList(), ",", dbCore.EscStart, dbCore.EscEnd),
-			util.JoinArr(update, ","))
-	} else {
-		upsertSQL = "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values(%s)"
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(cols, ","), util.JoinArr(values, ","))
+	upsertSQL.WriteString(util.JoinArr(formatCols, ","))
+	upsertSQL.WriteString(") values(")
+	upsertSQL.WriteString(util.JoinArr(values, ","))
+	upsertSQL.WriteByte(')')
+	if hasPK || hasUK {
+		upsertSQL.WriteString(" ON conflict(")
+
+		excludeSet := set.New[string]()
+		if hasPK {
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(orm.primaryKey)
+			upsertSQL.WriteString(dbCore.EscEnd)
+			excludeSet.Add(orm.primaryKey)
+		} else {
+			hasData := false
+			orm.uniqueKeys.Range(func(item string) bool {
+				if hasData {
+					upsertSQL.WriteByte(',')
+				}
+				hasData = true
+
+				upsertSQL.WriteString(dbCore.EscStart)
+				upsertSQL.WriteString(item)
+				upsertSQL.WriteString(dbCore.EscEnd)
+				return true
+			})
+			excludeSet = orm.uniqueKeys
+		}
+
+		upsertSQL.WriteString(") DO update set ")
+
+		hasData := false
+		for k := range colSet {
+			if excludeSet.Has(k) {
+				continue
+			}
+
+			if hasData {
+				upsertSQL.WriteByte(',')
+			}
+			hasData = true
+
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(k)
+			upsertSQL.WriteString(dbCore.EscEnd)
+			upsertSQL.WriteString("=EXCLUDED.")
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(k)
+			upsertSQL.WriteString(dbCore.EscEnd)
+		}
+
+		if !hasData {
+			return "", fmt.Errorf("conflict excluded field is empty")
+		}
 	}
 
-	return upsertSQL, nil
+	return upsertSQL.String(), nil
 }
 
 func (orm *ORM) sqliteUpsertManySQL(dataList []interface{}, cols []string) (string, error) {
+	if len(dataList) <= 0 {
+		return "", fmt.Errorf("insert data is nil")
+	}
+
 	dbCore := orm.ref.getDBConf()
 
-	if len(dataList) <= 0 {
-		return "", fmt.Errorf("upsert data is nil")
-	}
+	escLen := len(dbCore.EscStart) + len(dbCore.EscEnd)
+
+	var upsertSQL strings.Builder
+	upsertSQL.Grow(len(dataList)*len(cols)*5 + 100)
+
+	upsertSQL.WriteString("insert into ")
+	upsertSQL.WriteString(dbCore.EscStart)
+	upsertSQL.WriteString(orm.tableName)
+	upsertSQL.WriteString(dbCore.EscEnd)
 
 	typeErrStr := "type of upsert data is []map[string]interface{} or []*struct or []struct"
 
-	var valArr []string
+	valArr := make([]string, 0, len(dataList))
 	for _, data := range dataList {
 		var valMap map[string]interface{}
 		switch data := data.(type) {
@@ -348,45 +521,57 @@ func (orm *ORM) sqliteUpsertManySQL(dataList []interface{}, cols []string) (stri
 			return "", fmt.Errorf("sql data is empty, please check it")
 		}
 
-		subVal := "("
-		for _, colName := range cols {
-			if v, ok := valMap[colName]; ok {
+		var subVal strings.Builder
+		subVal.Grow(len(cols) * 10)
+		subVal.WriteByte('(')
+		for i := range cols {
+			if i > 0 {
+				subVal.WriteByte(',')
+			}
+			if v, ok := valMap[cols[i]]; ok {
 				val, timeEmpty := orm.formatValue(v)
-				if (colName == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
-					subVal += "null,"
+				if (cols[i] == orm.primaryKey && (val == "" || val == "0")) || timeEmpty {
+					subVal.WriteString("null")
 					continue
 				}
 
-				subVal += val + ","
-			} else if v, ok = valMap["#"+colName]; ok {
-				subVal += fmt.Sprintf("%v,", v)
+				subVal.WriteString(val)
+			} else if v, ok = valMap["#"+cols[i]]; ok {
+				subVal.WriteString(util.InterfaceToString(v))
 			} else {
-				subVal += "null,"
+				subVal.WriteString("null")
 			}
 		}
-		subVal = subVal[:len(subVal)-1] + ")"
-		valArr = append(valArr, subVal)
+		subVal.WriteByte(')')
+		valArr = append(valArr, subVal.String())
 	}
 
 	if len(valArr) <= 0 {
-		return "", fmt.Errorf("upsert data is empty")
+		return "", fmt.Errorf("insert data is empty")
 	}
 
-	newCols := make([]string, 0, len(cols))
-	updateCols := make([]string, 0, len(cols))
+	colSet := set.New[string]()
+	formatCols := make([]string, 0, len(cols))
 	for _, k := range cols {
 		err := globalVerifyObj.VerifyFieldName(k)
 		if err != nil {
 			return "", err
 		}
-		newCols = append(newCols, fmt.Sprintf("%s%s%s", dbCore.EscStart, k, dbCore.EscEnd))
-		updateCols = append(updateCols, fmt.Sprintf("%s%s%s=EXCLUDED.%s%s%s",
-			dbCore.EscStart, k, dbCore.EscEnd,
-			dbCore.EscStart, k, dbCore.EscEnd))
+
+		var buf strings.Builder
+		buf.Grow(escLen + len(k))
+		buf.WriteString(dbCore.EscStart)
+		buf.WriteString(k)
+		buf.WriteString(dbCore.EscEnd)
+
+		formatCols = append(formatCols, buf.String())
+		colSet.Add(k)
 	}
 
-	colSet := set.New[string]()
-	colSet.Add(cols...)
+	upsertSQL.WriteByte('(')
+	upsertSQL.WriteString(util.JoinArr(formatCols, ","))
+	upsertSQL.WriteString(") values")
+	upsertSQL.WriteString(util.JoinArr(valArr, ","))
 
 	hasPK := colSet.Has(orm.primaryKey)
 	hasUK := false
@@ -394,20 +579,57 @@ func (orm *ORM) sqliteUpsertManySQL(dataList []interface{}, cols []string) (stri
 		hasUK = orm.checkUK(colSet)
 	}
 
-	upsertSQL := "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values%s " +
-		"ON conflict(%s) DO update set %s"
-	if hasPK {
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(newCols, ","),
-			util.JoinArr(valArr, ","), orm.primaryKey, util.JoinArr(updateCols, ","))
-	} else if hasUK {
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(newCols, ","),
-			util.JoinArr(valArr, ","),
-			connectStrArr(orm.uniqueKeys.ToList(), ",", dbCore.EscStart, dbCore.EscEnd),
-			util.JoinArr(updateCols, ","))
-	} else {
-		upsertSQL = "insert into " + dbCore.EscStart + "%s" + dbCore.EscEnd + "(%s) values%s"
-		upsertSQL = fmt.Sprintf(upsertSQL, orm.tableName, util.JoinArr(newCols, ","), util.JoinArr(valArr, ","))
+	if hasPK || hasUK {
+		upsertSQL.WriteString(" ON conflict(")
+
+		excludeSet := set.New[string]()
+		if hasPK {
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(orm.primaryKey)
+			upsertSQL.WriteString(dbCore.EscEnd)
+			excludeSet.Add(orm.primaryKey)
+		} else {
+			hasData := false
+			orm.uniqueKeys.Range(func(item string) bool {
+				if hasData {
+					upsertSQL.WriteByte(',')
+				}
+				hasData = true
+
+				upsertSQL.WriteString(dbCore.EscStart)
+				upsertSQL.WriteString(item)
+				upsertSQL.WriteString(dbCore.EscEnd)
+				return true
+			})
+			excludeSet = orm.uniqueKeys
+		}
+
+		upsertSQL.WriteString(") DO update set ")
+
+		hasData := false
+		for k := range colSet {
+			if excludeSet.Has(k) {
+				continue
+			}
+
+			if hasData {
+				upsertSQL.WriteByte(',')
+			}
+			hasData = true
+
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(k)
+			upsertSQL.WriteString(dbCore.EscEnd)
+			upsertSQL.WriteString("=EXCLUDED.")
+			upsertSQL.WriteString(dbCore.EscStart)
+			upsertSQL.WriteString(k)
+			upsertSQL.WriteString(dbCore.EscEnd)
+		}
+
+		if !hasData {
+			return "", fmt.Errorf("conflict excluded field is empty")
+		}
 	}
 
-	return upsertSQL, nil
+	return upsertSQL.String(), nil
 }

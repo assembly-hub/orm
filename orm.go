@@ -5,9 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"reflect"
 	"strings"
-	"time"
 
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
@@ -413,7 +411,18 @@ func (orm *ORM) ToSQL(flat bool) string {
 	return q.SQL()
 }
 
-func (orm *ORM) PageData(result interface{}, flat bool, pageNo, pageSize uint) (*Paging, error) {
+func (orm *ORM) PageData(result interface{}, flat bool, pageNo, pageSize uint) (pg *Paging, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if orm.customSQL != "" {
 		return nil, ErrCustomSQL
 	}
@@ -455,7 +464,18 @@ func (orm *ORM) PageData(result interface{}, flat bool, pageNo, pageSize uint) (
 	return p, nil
 }
 
-func (orm *ORM) ToData(result interface{}, flat bool) error {
+func (orm *ORM) ToData(result interface{}, flat bool) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if !orm.keepQuery {
 		defer func() {
 			orm.ClearCache()
@@ -485,6 +505,17 @@ func (orm *ORM) ToData(result interface{}, flat bool) error {
 }
 
 func (orm *ORM) ExecuteSQL(customSQL string) (affectedRow int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	var ret sql.Result
 	if orm.tx != nil {
 		ret, err = orm.tx.ExecContext(orm.ctx, customSQL)
@@ -500,7 +531,18 @@ func (orm *ORM) ExecuteSQL(customSQL string) (affectedRow int64, err error) {
 }
 
 // Exist 检查数据是否存在
-func (orm *ORM) Exist() (bool, error) {
+func (orm *ORM) Exist() (b bool, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if orm.customSQL != "" {
 		return false, ErrCustomSQL
 	}
@@ -527,7 +569,7 @@ func (orm *ORM) Exist() (bool, error) {
 	}
 
 	var c int64
-	err := toData(orm.ctx, orm.db, orm.tx, &q, &c, false)
+	err = toData(orm.ctx, orm.db, orm.tx, &q, &c, false)
 	if err != nil {
 		return false, err
 	}
@@ -538,7 +580,18 @@ func (orm *ORM) Exist() (bool, error) {
 	return false, nil
 }
 
-func (orm *ORM) Count(clearCache bool) (int64, error) {
+func (orm *ORM) Count(clearCache bool) (c int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if orm.customSQL != "" {
 		return 0, ErrCustomSQL
 	}
@@ -568,6 +621,17 @@ func (orm *ORM) Count(clearCache bool) (int64, error) {
 }
 
 func (orm *ORM) InsertOne(data interface{}) (insertID int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	insertSQL, err := orm.formatInsertSQL(data)
 	if err != nil {
 		return 0, err
@@ -592,7 +656,19 @@ func (orm *ORM) InsertOne(data interface{}) (insertID int64, err error) {
 	return ret.LastInsertId()
 }
 
+// InsertMany 每条数据字段不一致或者想获取每条数据的主键，使用此方法
 func (orm *ORM) InsertMany(data []interface{}, trans bool) (affected int64, insertIDs []int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if len(data) <= 0 {
 		return 0, nil, fmt.Errorf("no data")
 	}
@@ -682,12 +758,23 @@ func (orm *ORM) InsertMany(data []interface{}, trans bool) (affected int64, inse
 	return
 }
 
-// InsertManySameClos
+// InsertManySameClos 字段一致使用此方法
 // data 需要处理的数据集合，数据格式为：map、*struct、struct，字段不在 cols 的被赋值null
 // cols 需要处理的字段集合
 // batchSize 单次并发数量
 // trans 是否使用事务
 func (orm *ORM) InsertManySameClos(data []interface{}, cols []string, batchSize int, trans bool) (affected int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if len(data) <= 0 {
 		return 0, fmt.Errorf("no data")
 	}
@@ -700,10 +787,8 @@ func (orm *ORM) InsertManySameClos(data []interface{}, cols []string, batchSize 
 		batchSize = defaultBatchSize
 	}
 
-	// dataArr := util.ArrSplit(data, batchSize)
-
 	dataLen := len(data)
-	sqlTask := execute.NewExecutor("insert sql task")
+	sqlTask := execute.NewExecutor("sql task")
 	for i := 0; i < dataLen; i += batchSize {
 		ends := i + batchSize
 		if ends > dataLen {
@@ -724,63 +809,22 @@ func (orm *ORM) InsertManySameClos(data []interface{}, cols []string, batchSize 
 		}
 	}
 
-	if trans && orm.db != nil {
-		tx, errTx := orm.db.BeginTx(orm.ctx, nil)
-		if errTx != nil {
-			return 0, errTx
-		}
-		defer func() {
-			if p := recover(); p != nil {
-				err1 := tx.Rollback()
-				err = fmt.Errorf("%v, Rollback=%w", p, err1)
-			}
-		}()
-
-		for _, sqlObj := range sqlArr {
-			execContext, err := tx.ExecContext(orm.ctx, sqlObj.(string))
-			if err != nil {
-				panic(err)
-			}
-
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
-			}
-			affected += rowsAffected
-		}
-
-		err = tx.Commit()
-	} else {
-		defer func() {
-			if p := recover(); p != nil {
-				err = fmt.Errorf("%v", p)
-			}
-		}()
-
-		var execContext sql.Result
-		for _, sqlObj := range sqlArr {
-			if orm.tx != nil {
-				execContext, err = orm.tx.ExecContext(orm.ctx, sqlObj.(string))
-			} else if orm.db != nil {
-				execContext, err = orm.db.ExecContext(orm.ctx, sqlObj.(string))
-			} else {
-				return 0, ErrClient
-			}
-			if err != nil {
-				panic(err)
-			}
-
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
-			}
-			affected += rowsAffected
-		}
-	}
+	affected, err = orm.batchExecuteSQL(sqlArr, trans)
 	return
 }
 
 func (orm *ORM) UpsertOne(data interface{}) (insertID int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	insertSQL, err := orm.formatUpsertSQL(data)
 	if err != nil {
 		return 0, err
@@ -805,7 +849,19 @@ func (orm *ORM) UpsertOne(data interface{}) (insertID int64, err error) {
 	return ret.LastInsertId()
 }
 
+// UpsertMany 每条数据字段不一致或者想获取每条数据的主键，使用此方法
 func (orm *ORM) UpsertMany(data []interface{}, trans bool) (affected int64, insertIDs []int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if len(data) <= 0 {
 		return 0, nil, fmt.Errorf("no data")
 	}
@@ -900,6 +956,17 @@ func (orm *ORM) UpsertMany(data []interface{}, trans bool) (affected int64, inse
 // batchSize 单次并发数量
 // trans 是否使用事务
 func (orm *ORM) UpsertManySameClos(data []interface{}, cols []string, batchSize int, trans bool) (affected int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if len(data) <= 0 {
 		return 0, fmt.Errorf("no data")
 	}
@@ -912,72 +979,29 @@ func (orm *ORM) UpsertManySameClos(data []interface{}, cols []string, batchSize 
 		batchSize = defaultBatchSize
 	}
 
-	dataArr := util.ArrSplit(data, batchSize)
-
-	var sqlArr []string
-
-	for _, d := range dataArr {
-		upsertSQL, err := orm.formatUpsertManySQL(d, cols)
-		if err != nil {
-			return 0, err
+	dataLen := len(data)
+	sqlTask := execute.NewExecutor("sql task")
+	for i := 0; i < dataLen; i += batchSize {
+		ends := i + batchSize
+		if ends > dataLen {
+			ends = dataLen
 		}
 
-		sqlArr = append(sqlArr, upsertSQL)
+		sqlTask.AddSimpleTask(orm.formatUpsertManySQL, data[i:ends], cols)
 	}
 
-	if trans && orm.db != nil {
-		tx, errTx := orm.db.BeginTx(orm.ctx, nil)
-		if errTx != nil {
-			return 0, errTx
-		}
-		defer func() {
-			if p := recover(); p != nil {
-				err1 := tx.Rollback()
-				err = fmt.Errorf("%v, Rollback=%w", p, err1)
-			}
-		}()
+	sqlArr, taskErrList, err := sqlTask.ExecuteTaskWithErr()
+	if err != nil {
+		return 0, err
+	}
 
-		for _, sqlObj := range sqlArr {
-			execContext, err := tx.ExecContext(orm.ctx, sqlObj)
-			if err != nil {
-				panic(err)
-			}
-
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
-			}
-			affected += rowsAffected
-		}
-
-		err = tx.Commit()
-	} else {
-		defer func() {
-			if p := recover(); p != nil {
-				err = fmt.Errorf("%v", p)
-			}
-		}()
-
-		var execContext sql.Result
-		for _, sqlObj := range sqlArr {
-			if orm.tx != nil {
-				execContext, err = orm.tx.ExecContext(orm.ctx, sqlObj)
-			} else if orm.db != nil {
-				execContext, err = orm.db.ExecContext(orm.ctx, sqlObj)
-			} else {
-				return 0, ErrClient
-			}
-			if err != nil {
-				panic(err)
-			}
-
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
-			}
-			affected += rowsAffected
+	for _, e := range taskErrList {
+		if e != nil {
+			return 0, e
 		}
 	}
+
+	affected, err = orm.batchExecuteSQL(sqlArr, trans)
 	return
 }
 
@@ -987,6 +1011,17 @@ func (orm *ORM) UpsertManySameClos(data []interface{}, cols []string, batchSize 
 // batchSize 单次并发数量
 // trans 是否使用事务
 func (orm *ORM) SaveMany(data []interface{}, trans bool) (affected int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if len(data) <= 0 {
 		return 0, fmt.Errorf("no data")
 	}
@@ -1059,6 +1094,17 @@ func (orm *ORM) SaveMany(data []interface{}, trans bool) (affected int64, err er
 }
 
 func (orm *ORM) UpdateByWhere(update map[string]interface{}, where Where) (affected int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	affected, err = 0, nil
 
 	dbCore := orm.ref.getDBConf()
@@ -1118,6 +1164,17 @@ func (orm *ORM) UpdateByWhere(update map[string]interface{}, where Where) (affec
 
 // UpdateMany 主键，id 不能为空，为空将更新失败
 func (orm *ORM) UpdateMany(data []interface{}, trans bool) (affected int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if len(data) <= 0 {
 		return 0, fmt.Errorf("no data")
 	}
@@ -1192,6 +1249,17 @@ func (orm *ORM) UpdateMany(data []interface{}, trans bool) (affected int64, err 
 
 // UpdateOne 主键，id 不能为空，为空将更新失败
 func (orm *ORM) UpdateOne(data interface{}) (affected int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	updateSQL, err := orm.formatUpdateSQL(data)
 	if err != nil {
 		return 0, err
@@ -1214,6 +1282,17 @@ func (orm *ORM) UpdateOne(data interface{}) (affected int64, err error) {
 }
 
 func (orm *ORM) ReplaceOne(data interface{}) (affected int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	replaceSQL, err := orm.formatReplaceSQL(data)
 	if err != nil {
 		return 0, err
@@ -1237,7 +1316,19 @@ func (orm *ORM) ReplaceOne(data interface{}) (affected int64, err error) {
 	return execContext.LastInsertId()
 }
 
+// ReplaceMany 每条数据字段不一致或者想获取每条数据的主键，使用此方法
 func (orm *ORM) ReplaceMany(data []interface{}, trans bool) (affected int64, insertIds []int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if len(data) <= 0 {
 		return 0, nil, fmt.Errorf("no data")
 	}
@@ -1332,6 +1423,17 @@ func (orm *ORM) ReplaceMany(data []interface{}, trans bool) (affected int64, ins
 // batchSize 单次并发数量
 // trans 是否使用事务
 func (orm *ORM) ReplaceManySameClos(data []interface{}, cols []string, batchSize int, trans bool) (affected int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	if len(data) <= 0 {
 		return 0, fmt.Errorf("no data")
 	}
@@ -1344,80 +1446,53 @@ func (orm *ORM) ReplaceManySameClos(data []interface{}, cols []string, batchSize
 		batchSize = defaultBatchSize
 	}
 
-	dataArr := util.ArrSplit(data, batchSize)
-
-	var sqlArr []string
-
-	for _, d := range dataArr {
-		replaceSQL, err := orm.formatReplaceManySQL(d, cols)
-		if err != nil {
-			return 0, err
+	dataLen := len(data)
+	sqlTask := execute.NewExecutor("sql task")
+	for i := 0; i < dataLen; i += batchSize {
+		ends := i + batchSize
+		if ends > dataLen {
+			ends = dataLen
 		}
 
-		sqlArr = append(sqlArr, replaceSQL)
+		sqlTask.AddSimpleTask(orm.formatReplaceManySQL, data[i:ends], cols)
 	}
 
-	if trans && orm.db != nil {
-		tx, errTx := orm.db.BeginTx(orm.ctx, nil)
-		if errTx != nil {
-			return 0, errTx
-		}
-		defer func() {
-			if p := recover(); p != nil {
-				err1 := tx.Rollback()
-				err = fmt.Errorf("%v, Rollback=%w", p, err1)
-			}
-		}()
+	sqlArr, taskErrList, err := sqlTask.ExecuteTaskWithErr()
+	if err != nil {
+		return 0, err
+	}
 
-		for _, sqlObj := range sqlArr {
-			execContext, err := tx.ExecContext(orm.ctx, sqlObj)
-			if err != nil {
-				panic(err)
-			}
-
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
-			}
-			affected += rowsAffected
-		}
-
-		err = tx.Commit()
-	} else {
-		defer func() {
-			if p := recover(); p != nil {
-				err = fmt.Errorf("%v", p)
-			}
-		}()
-
-		var execContext sql.Result
-		for _, sqlObj := range sqlArr {
-			if orm.tx != nil {
-				execContext, err = orm.tx.ExecContext(orm.ctx, sqlObj)
-			} else if orm.db != nil {
-				execContext, err = orm.db.ExecContext(orm.ctx, sqlObj)
-			} else {
-				return 0, ErrClient
-			}
-			if err != nil {
-				panic(err)
-			}
-
-			rowsAffected, err := execContext.RowsAffected()
-			if err != nil {
-				panic(err)
-			}
-			affected += rowsAffected
+	for _, e := range taskErrList {
+		if e != nil {
+			return 0, e
 		}
 	}
+
+	affected, err = orm.batchExecuteSQL(sqlArr, trans)
 	return
 }
 
 func (orm *ORM) DeleteByWhere(where map[string]interface{}) (affected int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
 	affected, err = 0, nil
 
 	dbCore := orm.ref.getDBConf()
-	s := "delete from " + dbCore.EscStart + "%s" + dbCore.EscEnd
+	var delSQL strings.Builder
+	delSQL.Grow(100)
+	delSQL.WriteString("delete from ")
+	delSQL.WriteString(dbCore.EscStart)
+	delSQL.WriteString(orm.tableName)
+	delSQL.WriteString(dbCore.EscEnd)
 
 	if len(where) > 0 {
 		q := BaseQuery{
@@ -1426,16 +1501,15 @@ func (orm *ORM) DeleteByWhere(where map[string]interface{}) (affected int64, err
 			TableName:  orm.tableName,
 			Where:      where,
 		}
-		s += " where " + q.GetWhere()
+		delSQL.WriteString(" where ")
+		delSQL.WriteString(q.GetWhere())
 	}
-
-	s = fmt.Sprintf(s, orm.tableName)
 
 	var ret sql.Result
 	if orm.tx != nil {
-		ret, err = orm.tx.ExecContext(orm.ctx, s)
+		ret, err = orm.tx.ExecContext(orm.ctx, delSQL.String())
 	} else if orm.db != nil {
-		ret, err = orm.db.ExecContext(orm.ctx, s)
+		ret, err = orm.db.ExecContext(orm.ctx, delSQL.String())
 	} else {
 		return 0, ErrClient
 	}
@@ -1445,199 +1519,4 @@ func (orm *ORM) DeleteByWhere(where map[string]interface{}) (affected int64, err
 	}
 
 	return ret.RowsAffected()
-}
-
-func (orm *ORM) formatInsertSQL(data interface{}) (string, error) {
-	return orm.innerInsertSQL(data)
-}
-
-// 需要主键
-func (orm *ORM) formatUpdateSQL(data interface{}) (string, error) {
-	return orm.innerUpdateSQL(data)
-}
-
-func (orm *ORM) formatInsertManySQL(dataList []interface{}, cols []string) (string, error) {
-	switch orm.ref.dbConf.DBType {
-	case dbtype.MySQL, dbtype.MariaDB, dbtype.SQLServer, dbtype.SQLite2, dbtype.SQLite3, dbtype.Postgres, dbtype.OpenGauss:
-		return orm.innerInsertManySQL(dataList, cols)
-	case dbtype.Oracle:
-		return orm.oracleInsertManySQL(dataList, cols)
-	default:
-		return "", ErrDBType
-	}
-}
-
-func (orm *ORM) formatReplaceSQL(data interface{}) (string, error) {
-	switch orm.ref.dbConf.DBType {
-	case dbtype.MySQL, dbtype.MariaDB, dbtype.SQLite2, dbtype.SQLite3:
-		return orm.innerReplaceSQL(data)
-	case dbtype.Oracle, dbtype.SQLServer, dbtype.Postgres, dbtype.OpenGauss:
-		return "", fmt.Errorf("当前数据库不支持Replace方法，请使用Upsert方法")
-	default:
-		return "", ErrDBType
-	}
-}
-
-func (orm *ORM) formatReplaceManySQL(dataList []interface{}, cols []string) (string, error) {
-	switch orm.ref.dbConf.DBType {
-	case dbtype.MySQL, dbtype.MariaDB, dbtype.SQLite2, dbtype.SQLite3:
-		return orm.innerReplaceManySQL(dataList, cols)
-	case dbtype.Oracle, dbtype.SQLServer, dbtype.Postgres, dbtype.OpenGauss:
-		return "", fmt.Errorf("当前数据库不支持Replace方法，请使用Upsert方法")
-	default:
-		return "", ErrDBType
-	}
-}
-
-func (orm *ORM) formatUpsertSQL(data interface{}) (string, error) {
-	switch orm.ref.dbConf.DBType {
-	case dbtype.MySQL, dbtype.MariaDB:
-		return orm.mysqlUpsertSQL(data)
-	case dbtype.OpenGauss:
-		return orm.gaussUpsertSQL(data)
-	case dbtype.SQLite2, dbtype.SQLite3:
-		return orm.sqliteUpsertSQL(data)
-	case dbtype.Postgres:
-		return orm.postgresUpsertSQL(data)
-	case dbtype.SQLServer:
-		return orm.sqlserverUpsertSQL(data)
-	case dbtype.Oracle:
-		return orm.oracleUpsertSQL(data)
-	default:
-		return "", ErrDBType
-	}
-}
-
-func (orm *ORM) formatUpsertManySQL(dataList []interface{}, cols []string) (string, error) {
-	switch orm.ref.dbConf.DBType {
-	case dbtype.MySQL, dbtype.MariaDB:
-		return orm.mysqlUpsertManySQL(dataList, cols)
-	case dbtype.OpenGauss:
-		return orm.gaussUpsertManySQL(dataList, cols)
-	case dbtype.SQLite2, dbtype.SQLite3:
-		return orm.sqliteUpsertManySQL(dataList, cols)
-	case dbtype.Postgres:
-		return orm.postgresUpsertManySQL(dataList, cols)
-	case dbtype.SQLServer:
-		return orm.sqlserverUpsertManySQL(dataList, cols)
-	case dbtype.Oracle:
-		return orm.oracleUpsertManySQL(dataList, cols)
-	default:
-		return "", ErrDBType
-	}
-}
-
-func (orm *ORM) formatSaveSQL(data interface{}) (string, error) {
-	typeErrStr := "type of upsert data is []map[string]interface{} or []*struct or []struct"
-
-	var valMap map[string]interface{}
-	switch data := data.(type) {
-	case map[string]interface{}:
-		valMap = data
-	default:
-		dataValue := reflect.ValueOf(data)
-		if dataValue.Type().Kind() != reflect.Struct && dataValue.Type().Kind() != reflect.Ptr {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		if dataValue.Type().Kind() == reflect.Ptr {
-			dataValue = dataValue.Elem()
-		}
-
-		if dataValue.Type().Kind() != reflect.Struct {
-			return "", fmt.Errorf(typeErrStr)
-		}
-
-		valMap = map[string]interface{}{}
-
-		for i := 0; i < dataValue.NumField(); i++ {
-			colName := dataValue.Type().Field(i).Tag.Get("json")
-			ref := dataValue.Type().Field(i).Tag.Get("ref")
-			if ref != "" || colName == "" || !dataValue.Type().Field(i).IsExported() {
-				continue
-			}
-
-			valMap[colName] = dataValue.Field(i).Interface()
-		}
-	}
-	if len(valMap) <= 0 {
-		return "", fmt.Errorf("sql data is empty, please check it")
-	}
-
-	if pk, ok := valMap[orm.primaryKey]; ok && pk != nil && pk != "" && pk != "0" {
-		return orm.formatUpdateSQL(valMap)
-	}
-	return orm.formatInsertSQL(data)
-}
-
-func (orm *ORM) formatValue(raw interface{}) (ret string, timeEmpty bool) {
-	ret, timeEmpty = "", false
-	if raw == nil {
-		ret = "null"
-		return
-	}
-
-	switch raw := raw.(type) {
-	case string:
-		ret = raw
-		ret = strings.ReplaceAll(ret, "'", orm.ref.dbConf.StrEsc+"'")
-		ret = fmt.Sprintf("'%s'", ret)
-	case time.Time:
-		if raw.IsZero() {
-			timeEmpty = true
-			break
-		}
-
-		ret = time2Str(raw)
-		ret = fmt.Sprintf("'%s'", ret)
-		if orm.ref.dbConf.DBType == dbtype.Oracle {
-			ret = oracleDateTime(ret, false)
-		}
-	case *time.Time:
-		if raw.IsZero() {
-			timeEmpty = true
-			break
-		}
-
-		ret = time2Str(*raw)
-		ret = fmt.Sprintf("'%s'", ret)
-		if orm.ref.dbConf.DBType == dbtype.Oracle {
-			ret = oracleDateTime(ret, false)
-		}
-	case bool:
-		if raw {
-			ret = "1"
-		} else {
-			ret = "0"
-		}
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
-		ret = fmt.Sprintf("%v", raw)
-	default:
-		def := reflect.TypeOf(raw)
-		if def.Kind() == reflect.String {
-			ret = fmt.Sprintf("%v", raw)
-			ret = strings.ReplaceAll(ret, "'", orm.ref.dbConf.StrEsc+"'")
-			ret = fmt.Sprintf("'%s'", ret)
-			return
-		}
-
-		ret = util.InterfaceToString(raw)
-		ret = strings.ReplaceAll(ret, "'", orm.ref.dbConf.StrEsc+"'")
-		ret = fmt.Sprintf("'%s'", ret)
-	}
-	return
-}
-
-func (orm *ORM) checkUK(colSet set.Set[string]) bool {
-	if orm.uniqueKeys.Empty() {
-		return false
-	}
-
-	uk := orm.uniqueKeys.ToList()
-	for _, k := range uk {
-		if !colSet.Has(k) {
-			return false
-		}
-	}
-	return true
 }
