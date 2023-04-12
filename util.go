@@ -330,18 +330,29 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interf
 			return fmt.Errorf("column too many")
 		}
 
-		elemList := reflect.MakeSlice(reflect.SliceOf(elemType), 0, len(ret))
-		for _, m := range ret {
-			newData := reflect.New(elemType)
-			newData = newData.Elem()
-			for _, v := range m {
-				err = setDataFunc(newData, v)
-				if err != nil {
-					return err
-				}
-				break
+		mapKey := ""
+		for k := range ret[0] {
+			mapKey = k
+			break
+		}
+
+		elemList := reflect.MakeSlice(reflect.SliceOf(elemType), len(ret), len(ret))
+		//for _, m := range ret {
+		//	newData := reflect.New(elemType)
+		//	newData = newData.Elem()
+		//	err = setDataFunc(newData, m[mapKey])
+		//	if err != nil {
+		//		return err
+		//	}
+		//	elemList = reflect.Append(elemList, newData)
+		//}
+
+		for i := range ret {
+			err = setDataFunc(elemList.Index(i), ret[i][mapKey])
+			if err != nil {
+				return err
 			}
-			elemList = reflect.Append(elemList, newData)
+			// elemList = reflect.Append(elemList, newData)
 		}
 
 		dataValue.Set(elemList)
