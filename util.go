@@ -353,7 +353,8 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interf
 		//}
 
 		for i := range ret {
-			elemList.Index(i).Set(reflect.ValueOf(ret[i][mapKey]))
+			v := elemList.Index(i)
+			setDataFunc(&v, ret[i][mapKey])
 		}
 
 		dataValue.Set(elemList)
