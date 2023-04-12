@@ -30,6 +30,8 @@ const (
 	jsonOther = structJSONType(3)
 )
 
+const defCacheSize = 50
+
 func time2Str(t interface{}) string {
 	switch t := t.(type) {
 	case time.Time:
@@ -130,7 +132,14 @@ func toListMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool) ([]
 		}(rows)
 	}
 
-	result, err := scanMapList(rows, flat, q.SelectColLinkStr)
+	cacheLen := defCacheSize
+	if len(q.Limit) == 1 {
+		cacheLen = int(q.Limit[0])
+	} else if len(q.Limit) == 2 {
+		cacheLen = int(q.Limit[1])
+	}
+
+	result, err := scanMapList(rows, flat, q.SelectColLinkStr, cacheLen)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +147,7 @@ func toListMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool) ([]
 	return result, nil
 }
 
-func scanMapList(rows *sql.Rows, flat bool, colLinkStr string) (result []map[string]interface{}, err error) {
+func scanMapList(rows *sql.Rows, flat bool, colLinkStr string, cacheLen int) (result []map[string]interface{}, err error) {
 	if rows != nil {
 		defer func(rows *sql.Rows) {
 			err = rows.Close()
@@ -161,6 +170,11 @@ func scanMapList(rows *sql.Rows, flat bool, colLinkStr string) (result []map[str
 		return nil, err
 	}
 
+	if cacheLen <= 0 {
+		cacheLen = defCacheSize
+	}
+
+	result = make([]map[string]interface{}, 0, cacheLen)
 	for {
 		b := rows.Next()
 		if !b {
@@ -204,7 +218,7 @@ func toFirstMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool) (m
 		return nil, err
 	}
 
-	result, err := scanMapList(rows, flat, q.SelectColLinkStr)
+	result, err := scanMapList(rows, flat, q.SelectColLinkStr, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +421,7 @@ func count(ctx context.Context, db *DB, tx *Tx, q *BaseQuery) (int64, error) {
 		return 0, err
 	}
 
-	result, err := scanMapList(rows, false, q.SelectColLinkStr)
+	result, err := scanMapList(rows, false, q.SelectColLinkStr, 1)
 	if err != nil {
 		return 0, err
 	}
