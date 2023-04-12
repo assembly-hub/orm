@@ -809,7 +809,7 @@ func (orm *ORM) InsertManySameClos(data []interface{}, cols []string, batchSize 
 		}
 	}
 
-	affected, err = orm.batchExecuteSQL(sqlArr, trans)
+	affected, err = orm.executeSQL(sqlArr, trans)
 	return
 }
 
@@ -1001,7 +1001,7 @@ func (orm *ORM) UpsertManySameClos(data []interface{}, cols []string, batchSize 
 		}
 	}
 
-	affected, err = orm.batchExecuteSQL(sqlArr, trans)
+	affected, err = orm.executeSQL(sqlArr, trans)
 	return
 }
 
@@ -1468,7 +1468,7 @@ func (orm *ORM) ReplaceManySameClos(data []interface{}, cols []string, batchSize
 		}
 	}
 
-	affected, err = orm.batchExecuteSQL(sqlArr, trans)
+	affected, err = orm.executeSQL(sqlArr, trans)
 	return
 }
 

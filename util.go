@@ -230,7 +230,7 @@ func toFirstMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool) (m
 	return result[0], nil
 }
 
-func setDataFunc(dataVal *reflect.Value, v interface{}) error {
+func setDataFunc(dataVal *reflect.Value, v interface{}) {
 	switch v := v.(type) {
 	case string:
 		dataVal.SetString(v)
@@ -263,8 +263,6 @@ func setDataFunc(dataVal *reflect.Value, v interface{}) error {
 	default:
 		dataVal.Set(reflect.ValueOf(v))
 	}
-
-	return nil
 }
 
 func jsonListDataFormat(elem reflect.Type, ret []map[string]interface{}) error {
@@ -342,15 +340,6 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interf
 		}
 
 		elemList := reflect.MakeSlice(reflect.SliceOf(elemType), len(ret), len(ret))
-		//for _, m := range ret {
-		//	newData := reflect.New(elemType)
-		//	newData = newData.Elem()
-		//	err = setDataFunc(newData, m[mapKey])
-		//	if err != nil {
-		//		return err
-		//	}
-		//	elemList = reflect.Append(elemList, newData)
-		//}
 
 		for i := range ret {
 			v := elemList.Index(i)
@@ -406,11 +395,7 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 			return fmt.Errorf("column too many")
 		}
 		for _, v := range ret {
-			dataValue.Set(reflect.ValueOf(v))
-			//err = setDataFunc(dataValue, v)
-			//if err != nil {
-			//	return err
-			//}
+			setDataFunc(&dataValue, v)
 			break
 		}
 	}

@@ -9,8 +9,6 @@ import (
 
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
-	"github.com/assembly-hub/task/execute"
-
 	"github.com/assembly-hub/orm/dbtype"
 )
 
@@ -221,9 +219,7 @@ func (orm *ORM) checkUK(colSet set.Set[string]) bool {
 	return true
 }
 
-func (orm *ORM) batchExecuteSQL(sqlArr []interface{}, trans bool) (affected int64, err error) {
-	sqlTask := execute.NewExecutor("batchExecuteSQL task")
-
+func (orm *ORM) executeSQL(sqlArr []interface{}, trans bool) (affected int64, err error) {
 	if trans && orm.db != nil {
 		tx, errTx := orm.db.BeginTx(orm.ctx, nil)
 		if errTx != nil {
@@ -236,29 +232,18 @@ func (orm *ORM) batchExecuteSQL(sqlArr []interface{}, trans bool) (affected int6
 			}
 		}()
 
-		for _, sqlObj := range sqlArr {
-			sqlTask.AddSimpleTask(func(sqlStr string) (int64, error) {
-				execContext, err := tx.ExecContext(orm.ctx, sqlStr)
-				if err != nil {
-					return 0, err
-				}
-
-				return execContext.RowsAffected()
-			}, sqlObj.(string))
-		}
-
-		retList, taskErrList, err := sqlTask.ExecuteTaskWithErr()
-		if err != nil {
-			panic(err)
-		}
-
-		for i, e := range taskErrList {
+		for _, sqlStr := range sqlArr {
+			execContext, e := tx.ExecContext(orm.ctx, sqlStr.(string))
 			if e != nil {
 				panic(e)
 			}
-			affected += retList[i].(int64)
-		}
 
+			i64, e := execContext.RowsAffected()
+			if e != nil {
+				panic(e)
+			}
+			affected += i64
+		}
 		err = tx.Commit()
 	} else {
 		defer func() {
@@ -268,33 +253,23 @@ func (orm *ORM) batchExecuteSQL(sqlArr []interface{}, trans bool) (affected int6
 		}()
 
 		var execContext sql.Result
-		for _, sqlObj := range sqlArr {
-			sqlTask.AddSimpleTask(func(sqlStr string) (int64, error) {
-				if orm.tx != nil {
-					execContext, err = orm.tx.ExecContext(orm.ctx, sqlStr)
-				} else if orm.db != nil {
-					execContext, err = orm.db.ExecContext(orm.ctx, sqlStr)
-				} else {
-					return 0, ErrClient
-				}
-				if err != nil {
-					return 0, err
-				}
+		for _, sqlStr := range sqlArr {
+			if orm.tx != nil {
+				execContext, err = orm.tx.ExecContext(orm.ctx, sqlStr.(string))
+			} else if orm.db != nil {
+				execContext, err = orm.db.ExecContext(orm.ctx, sqlStr.(string))
+			} else {
+				panic(ErrClient)
+			}
+			if err != nil {
+				panic(err)
+			}
 
-				return execContext.RowsAffected()
-			}, sqlObj.(string))
-		}
-
-		retList, taskErrList, err := sqlTask.ExecuteTaskWithErr()
-		if err != nil {
-			panic(err)
-		}
-
-		for i, e := range taskErrList {
+			i64, e := execContext.RowsAffected()
 			if e != nil {
 				panic(e)
 			}
-			affected += retList[i].(int64)
+			affected += i64
 		}
 	}
 	return
