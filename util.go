@@ -230,29 +230,34 @@ func toFirstMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool) (m
 	return result[0], nil
 }
 
-func setDataFunc(dataVal reflect.Value, v interface{}) error {
-	val := fmt.Sprintf("%v", v)
+func setDataFunc(dataVal *reflect.Value, v interface{}) error {
 	switch v := v.(type) {
 	case string:
-		dataVal.SetString(val)
-	case int, int8, int16, int32, int64:
-		i64, err := util.Str2Int[int64](val)
-		if err != nil {
-			return err
-		}
-		dataVal.SetInt(i64)
-	case uint, uint8, uint16, uint32, uint64:
-		u64, err := util.Str2Uint[uint64](val)
-		if err != nil {
-			return err
-		}
-		dataVal.SetUint(u64)
-	case float32, float64:
-		f64, err := util.Str2Float[float64](val)
-		if err != nil {
-			return err
-		}
-		dataVal.SetFloat(f64)
+		dataVal.SetString(v)
+	case int:
+		dataVal.SetInt(int64(v))
+	case int8:
+		dataVal.SetInt(int64(v))
+	case int16:
+		dataVal.SetInt(int64(v))
+	case int32:
+		dataVal.SetInt(int64(v))
+	case int64:
+		dataVal.SetInt(v)
+	case uint:
+		dataVal.SetUint(uint64(v))
+	case uint8:
+		dataVal.SetUint(uint64(v))
+	case uint16:
+		dataVal.SetUint(uint64(v))
+	case uint32:
+		dataVal.SetUint(uint64(v))
+	case uint64:
+		dataVal.SetUint(v)
+	case float32:
+		dataVal.SetFloat(float64(v))
+	case float64:
+		dataVal.SetFloat(v)
 	case []byte:
 		dataVal.SetBytes(v)
 	default:
@@ -348,11 +353,7 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interf
 		//}
 
 		for i := range ret {
-			err = setDataFunc(elemList.Index(i), ret[i][mapKey])
-			if err != nil {
-				return err
-			}
-			// elemList = reflect.Append(elemList, newData)
+			elemList.Index(i).Set(reflect.ValueOf(ret[i][mapKey]))
 		}
 
 		dataValue.Set(elemList)
@@ -404,10 +405,11 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 			return fmt.Errorf("column too many")
 		}
 		for _, v := range ret {
-			err = setDataFunc(dataValue, v)
-			if err != nil {
-				return err
-			}
+			dataValue.Set(reflect.ValueOf(v))
+			//err = setDataFunc(dataValue, v)
+			//if err != nil {
+			//	return err
+			//}
 			break
 		}
 	}
