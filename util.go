@@ -14,7 +14,6 @@ import (
 
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
-	"github.com/assembly-hub/task/execute"
 )
 
 const (
@@ -363,53 +362,13 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interf
 			return err
 		}
 	} else {
-		ret, err := toListMap(ctx, db, tx, q, true)
-		if err != nil {
-			return err
-		}
-		if len(ret) <= 0 {
-			return nil
-		}
+		ret, err := toListSingleData(ctx, db, tx, q, elemType)
 
-		if len(ret[0]) != 1 {
-			return fmt.Errorf("column too many")
-		}
-
-		mapKey := ""
-		for k := range ret[0] {
-			mapKey = k
-			break
-		}
-
-		elemList := reflect.MakeSlice(reflect.SliceOf(elemType), len(ret), len(ret))
-		scanTask := execute.NewExecutor("scan list")
-		dataLen := len(ret)
-		for starts := 0; starts < dataLen; starts += scanBatchSize {
-			ends := starts + scanBatchSize
-			if ends > dataLen {
-				ends = dataLen
-			}
-			scanTask.AddSimpleTask(func(s, e int) (any, error) {
-				for i := s; i < e; i++ {
-					v := elemList.Index(i)
-					setDataFunc(&v, ret[i][mapKey])
-				}
-				return nil, nil
-			}, starts, ends)
-		}
-
-		_, taskErr, err := scanTask.ExecuteTaskWithErr()
 		if err != nil {
 			return err
 		}
 
-		for i := range taskErr {
-			if taskErr[i] != nil {
-				return taskErr[i]
-			}
-		}
-
-		dataValue.Set(elemList)
+		dataValue.Set(*ret)
 	}
 	return nil
 }
@@ -447,50 +406,87 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 		}
 	} else {
 		// 单个基础类型
-		err := toFirstBasicData(ctx, db, tx, q, &dataValue)
+		ret, err := toFirstSingleData(ctx, db, tx, q, dataValue.Type())
 		if err != nil {
 			return err
 		}
 
-		// setDataFunc(&dataValue, ret)
+		if ret != nil {
+			dataValue.Set(*ret)
+		}
 	}
 
 	return nil
 }
 
-func toFirstBasicData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, data *reflect.Value) error {
+func toFirstSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp reflect.Type) (ret *reflect.Value, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	q.Limit = []uint{1}
 	var rows *sql.Rows
-	var err error
 	if tx != nil {
 		rows, err = tx.QueryContext(ctx, q.SQL())
 	} else if db != nil {
 		rows, err = db.QueryContext(ctx, q.SQL())
 	} else {
-		return ErrClient
+		return nil, ErrClient
 	}
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	result, err := scanBasicList(rows, 1, data.Type())
+	result, err := scanSingleList(rows, 1, tp)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if result.Len() <= 0 {
-		return nil
+		return nil, nil
 	}
 
-	data.Set(result.Index(0))
-	return nil
+	elem := result.Index(0)
+	return &elem, nil
 }
 
-func scanBasicList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *reflect.Value, err error) {
+func toListSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp reflect.Type) (ret *reflect.Value, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var rows *sql.Rows
+	if tx != nil {
+		rows, err = tx.QueryContext(ctx, q.SQL())
+	} else if db != nil {
+		rows, err = db.QueryContext(ctx, q.SQL())
+	} else {
+		return nil, ErrClient
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	cacheLen := defCacheSize
+	if len(q.Limit) == 1 {
+		cacheLen = int(q.Limit[0])
+	} else if len(q.Limit) == 2 {
+		cacheLen = int(q.Limit[1])
+	}
+
+	result, err := scanSingleList(rows, cacheLen, tp)
+	if err != nil {
+		return nil, err
+	}
+
+	if result.Len() <= 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
+func scanSingleList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *reflect.Value, err error) {
 	if rows != nil {
 		defer func(rows *sql.Rows) {
 			err = rows.Close()
@@ -514,12 +510,6 @@ func scanBasicList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *refle
 		return nil, ErrTooManyColumn
 	}
 
-	//colType, err := rows.ColumnTypes()
-	//if err != nil {
-	//	log.Println(err.Error())
-	//	return nil, err
-	//}
-
 	if cacheLen <= 0 {
 		cacheLen = defCacheSize
 	}
@@ -530,14 +520,10 @@ func scanBasicList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *refle
 	val := reflect.New(tp).Interface()
 	idx := 0
 	for {
-		b := rows.Next()
-		if !b {
+		if !rows.Next() {
 			break
 		}
 
-		// val := newDataByDBType(colType[0])
-		//elem := reflect.New(tp)
-		//val := elem.Interface()
 		err = rows.Scan(val)
 		if err != nil {
 			log.Println(err.Error())
