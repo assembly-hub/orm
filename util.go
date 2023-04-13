@@ -514,11 +514,11 @@ func scanBasicList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *refle
 		return nil, ErrTooManyColumn
 	}
 
-	colType, err := rows.ColumnTypes()
-	if err != nil {
-		log.Println(err.Error())
-		return nil, err
-	}
+	//colType, err := rows.ColumnTypes()
+	//if err != nil {
+	//	log.Println(err.Error())
+	//	return nil, err
+	//}
 
 	if cacheLen <= 0 {
 		cacheLen = defCacheSize
@@ -526,6 +526,8 @@ func scanBasicList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *refle
 
 	elemList := reflect.MakeSlice(reflect.SliceOf(tp), cacheLen, cacheLen)
 	result = &elemList
+
+	val := reflect.New(tp).Interface()
 	idx := 0
 	for {
 		b := rows.Next()
@@ -533,7 +535,9 @@ func scanBasicList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *refle
 			break
 		}
 
-		val := newDataByDBType(colType[0])
+		// val := newDataByDBType(colType[0])
+		//elem := reflect.New(tp)
+		//val := elem.Interface()
 		err = rows.Scan(val)
 		if err != nil {
 			log.Println(err.Error())
