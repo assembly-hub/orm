@@ -11,3 +11,5 @@ var ErrBetweenValueMatch = errors.New("[between]: the parameter array length is 
 var ErrCustomSQL = errors.New("custom sql does not allow this operation")
 var ErrDBType = errors.New("the current database type is not currently supported")
 var ErrDBFunc = errors.New("this method is not currently supported in the current database")
+var ErrTooManyColumn = errors.New("too many columns")
+var ErrTooFewColumn = errors.New("too few columns")

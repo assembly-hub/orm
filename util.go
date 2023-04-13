@@ -408,24 +408,105 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 			return err
 		}
 	} else {
-		ret, err := toFirstMap(ctx, db, tx, q, true)
+		// 单个基础类型
+		ret, err := toFirstBasicData(ctx, db, tx, q)
 		if err != nil {
 			return err
 		}
-		if len(ret) <= 0 {
+		if ret == nil {
 			return nil
 		}
 
-		if len(ret) != 1 {
-			return fmt.Errorf("column too many")
-		}
-		for _, v := range ret {
-			setDataFunc(&dataValue, v)
-			break
-		}
+		setDataFunc(&dataValue, ret)
 	}
 
 	return nil
+}
+
+func toFirstBasicData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery) (interface{}, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	q.Limit = []uint{1}
+	var rows *sql.Rows
+	var err error
+	if tx != nil {
+		rows, err = tx.QueryContext(ctx, q.SQL())
+	} else if db != nil {
+		rows, err = db.QueryContext(ctx, q.SQL())
+	} else {
+		return nil, ErrClient
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := scanBasicList(rows, 1)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(result) <= 0 {
+		return nil, nil
+	}
+
+	return result[0], nil
+}
+
+func scanBasicList(rows *sql.Rows, cacheLen int) (result []interface{}, err error) {
+	if rows != nil {
+		defer func(rows *sql.Rows) {
+			err = rows.Close()
+			if err != nil {
+				log.Println(err.Error())
+			}
+		}(rows)
+	} else {
+		return nil, nil
+	}
+
+	cols, err := rows.Columns()
+	if err != nil {
+		log.Println(err.Error())
+		return nil, err
+	}
+	if len(cols) == 0 {
+		return nil, ErrTooFewColumn
+	}
+	if len(cols) > 1 {
+		return nil, ErrTooManyColumn
+	}
+
+	//colType, err := rows.ColumnTypes()
+	//if err != nil {
+	//	log.Println(err.Error())
+	//	return nil, err
+	//}
+
+	if cacheLen <= 0 {
+		cacheLen = defCacheSize
+	}
+
+	result = make([]interface{}, 0, cacheLen)
+	for {
+		b := rows.Next()
+		if !b {
+			break
+		}
+		//row := make([]interface{}, len(cols))
+		//prepareValues(row, colType, cols)
+		var val interface{}
+		err = rows.Scan(&val)
+		if err != nil {
+			log.Println(err.Error())
+			return nil, err
+		}
+
+		result = append(result, val)
+	}
+
+	return result, nil
 }
 
 func count(ctx context.Context, db *DB, tx *Tx, q *BaseQuery) (int64, error) {
