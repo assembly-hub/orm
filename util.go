@@ -535,13 +535,14 @@ func scanBasicList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *refle
 
 		val := newDataByDBType(colType[0])
 		err = rows.Scan(val)
-		elem := elemList.Index(idx)
-		setDataFuncPtr(&elem, val)
-		idx++
 		if err != nil {
 			log.Println(err.Error())
 			return nil, err
 		}
+
+		elem := elemList.Index(idx)
+		setDataFuncPtr(&elem, val)
+		idx++
 	}
 
 	return result, nil
