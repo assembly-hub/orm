@@ -57,11 +57,7 @@ func str2Time(s string) time.Time {
 func prepareValues(values []interface{}, columnTypes []*sql.ColumnType, columns []string) {
 	if len(columnTypes) > 0 {
 		for idx, columnType := range columnTypes {
-			if columnType.ScanType() != nil {
-				values[idx] = reflect.New(reflect.PtrTo(columnType.ScanType())).Interface()
-			} else {
-				values[idx] = new(interface{})
-			}
+			values[idx] = newDataByDBType(columnType)
 		}
 	} else {
 		for idx := range columns {
@@ -70,9 +66,16 @@ func prepareValues(values []interface{}, columnTypes []*sql.ColumnType, columns 
 	}
 }
 
+func newDataByDBType(columnType *sql.ColumnType) interface{} {
+	if columnType != nil && columnType.ScanType() != nil {
+		return reflect.New(columnType.ScanType()).Interface()
+	}
+	return new(interface{})
+}
+
 func scanIntoMap(mapValue map[string]interface{}, values []interface{}, columns []string) {
 	for idx, column := range columns {
-		if reflectValue := reflect.Indirect(reflect.Indirect(reflect.ValueOf(values[idx]))); reflectValue.IsValid() {
+		if reflectValue := reflect.Indirect(reflect.ValueOf(values[idx])); reflectValue.IsValid() {
 			mapValue[column] = reflectValue.Interface()
 			if valuer, ok := mapValue[column].(driver.Valuer); ok {
 				mapValue[column], _ = valuer.Value()
@@ -269,6 +272,41 @@ func setDataFunc(dataVal *reflect.Value, v interface{}) {
 	}
 }
 
+func setDataFuncPtr(dataVal *reflect.Value, v interface{}) {
+	switch v := v.(type) {
+	case *string:
+		dataVal.SetString(*v)
+	case *int:
+		dataVal.SetInt(int64(*v))
+	case *int8:
+		dataVal.SetInt(int64(*v))
+	case *int16:
+		dataVal.SetInt(int64(*v))
+	case *int32:
+		dataVal.SetInt(int64(*v))
+	case *int64:
+		dataVal.SetInt(*v)
+	case *uint:
+		dataVal.SetUint(uint64(*v))
+	case *uint8:
+		dataVal.SetUint(uint64(*v))
+	case *uint16:
+		dataVal.SetUint(uint64(*v))
+	case *uint32:
+		dataVal.SetUint(uint64(*v))
+	case *uint64:
+		dataVal.SetUint(*v)
+	case *float32:
+		dataVal.SetFloat(float64(*v))
+	case *float64:
+		dataVal.SetFloat(*v)
+	case *[]byte:
+		dataVal.SetBytes(*v)
+	default:
+		dataVal.Set(reflect.Indirect(reflect.ValueOf(v)))
+	}
+}
+
 func jsonListDataFormat(elem reflect.Type, ret []map[string]interface{}) error {
 	if elem.Kind() == reflect.Struct || (elem.Kind() == reflect.Ptr || elem.Elem().Kind() == reflect.Struct) {
 		colMap, err := structJSONField(elem)
@@ -409,21 +447,18 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 		}
 	} else {
 		// 单个基础类型
-		ret, err := toFirstBasicData(ctx, db, tx, q)
+		err := toFirstBasicData(ctx, db, tx, q, &dataValue)
 		if err != nil {
 			return err
 		}
-		if ret == nil {
-			return nil
-		}
 
-		setDataFunc(&dataValue, ret)
+		// setDataFunc(&dataValue, ret)
 	}
 
 	return nil
 }
 
-func toFirstBasicData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery) (interface{}, error) {
+func toFirstBasicData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, data *reflect.Value) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -435,26 +470,27 @@ func toFirstBasicData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery) (interf
 	} else if db != nil {
 		rows, err = db.QueryContext(ctx, q.SQL())
 	} else {
-		return nil, ErrClient
+		return ErrClient
 	}
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	result, err := scanBasicList(rows, 1)
+	result, err := scanBasicList(rows, 1, data.Type())
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	if len(result) <= 0 {
-		return nil, nil
+	if result.Len() <= 0 {
+		return nil
 	}
 
-	return result[0], nil
+	data.Set(result.Index(0))
+	return nil
 }
 
-func scanBasicList(rows *sql.Rows, cacheLen int) (result []interface{}, err error) {
+func scanBasicList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *reflect.Value, err error) {
 	if rows != nil {
 		defer func(rows *sql.Rows) {
 			err = rows.Close()
@@ -488,21 +524,24 @@ func scanBasicList(rows *sql.Rows, cacheLen int) (result []interface{}, err erro
 		cacheLen = defCacheSize
 	}
 
-	result = make([]interface{}, 0, cacheLen)
+	elemList := reflect.MakeSlice(reflect.SliceOf(tp), cacheLen, cacheLen)
+	result = &elemList
+	idx := 0
 	for {
 		b := rows.Next()
 		if !b {
 			break
 		}
-		row := make([]interface{}, len(cols))
-		prepareValues(row, colType, cols)
-		err = rows.Scan(row...)
+
+		val := newDataByDBType(colType[0])
+		err = rows.Scan(val)
+		elem := elemList.Index(idx)
+		setDataFuncPtr(&elem, val)
+		idx++
 		if err != nil {
 			log.Println(err.Error())
 			return nil, err
 		}
-
-		result = append(result, row[0])
 	}
 
 	return result, nil
