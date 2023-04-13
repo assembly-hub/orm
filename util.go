@@ -72,15 +72,35 @@ func newDataByDBType(columnType *sql.ColumnType) interface{} {
 	return new(interface{})
 }
 
+func scanIntoReflectMap(mapValue *reflect.Value, values []interface{}, columns []reflect.Value) {
+	for idx := range columns {
+		if reflectValue := reflect.Indirect(reflect.ValueOf(values[idx])); reflectValue.IsValid() {
+			if valuer, ok := reflectValue.Interface().(driver.Valuer); ok {
+				val, _ := valuer.Value()
+				mapValue.SetMapIndex(columns[idx], reflect.ValueOf(val))
+				continue
+			} else if b, ok := reflectValue.Interface().(sql.RawBytes); ok {
+				mapValue.SetMapIndex(columns[idx], reflect.ValueOf(string(b)))
+				continue
+			}
+			mapValue.SetMapIndex(columns[idx], reflectValue)
+		} else {
+			reflectValue.SetMapIndex(columns[idx], reflect.ValueOf(nil))
+		}
+	}
+}
+
 func scanIntoMap(mapValue map[string]interface{}, values []interface{}, columns []string) {
 	for idx, column := range columns {
 		if reflectValue := reflect.Indirect(reflect.ValueOf(values[idx])); reflectValue.IsValid() {
-			mapValue[column] = reflectValue.Interface()
-			if valuer, ok := mapValue[column].(driver.Valuer); ok {
+			if valuer, ok := reflectValue.Interface().(driver.Valuer); ok {
 				mapValue[column], _ = valuer.Value()
-			} else if b, ok := mapValue[column].(sql.RawBytes); ok {
+				continue
+			} else if b, ok := reflectValue.Interface().(sql.RawBytes); ok {
 				mapValue[column] = string(b)
+				continue
 			}
+			mapValue[column] = reflectValue.Interface()
 		} else {
 			mapValue[column] = nil
 		}
@@ -209,7 +229,14 @@ func toFirstMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool) (m
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
 	q.Limit = []uint{1}
+	if len(q.Limit) == 2 {
+		q.Limit[1] = 1
+	} else {
+		q.Limit = []uint{1}
+	}
+
 	var rows *sql.Rows
 	var err error
 	if tx != nil {
@@ -338,9 +365,22 @@ func jsonDataFormat(elem reflect.Type, ret map[string]interface{}) error {
 
 func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{}, flat bool, dataValue *reflect.Value) error {
 	elemType := dataValue.Type().Elem()
-	if elemType.Kind() == reflect.Struct || elemType.Kind() == reflect.Map ||
-		(elemType.Kind() == reflect.Ptr && (elemType.Elem().Kind() == reflect.Struct ||
-			elemType.Elem().Kind() == reflect.Map)) {
+	switch elemType.Kind() {
+	case reflect.Map:
+		keyT := elemType.Key()
+		if keyT.Kind() != reflect.String {
+			return ErrMapKeyType
+		}
+		valT := elemType.Elem()
+		ret, err := toListDataMap(ctx, db, tx, q, flat, keyT, valT)
+		if err != nil {
+			return err
+		}
+
+		if ret != nil {
+			dataValue.Set(*ret)
+		}
+	case reflect.Struct:
 		ret, err := toListMap(ctx, db, tx, q, flat)
 		if err != nil {
 			return err
@@ -361,15 +401,38 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interf
 		if err != nil {
 			return err
 		}
-	} else {
-		ret, err := toListSingleData(ctx, db, tx, q, elemType)
-
+	case reflect.Ptr:
+		ret, err := toListMap(ctx, db, tx, q, flat)
+		if err != nil {
+			return err
+		}
+		err = jsonListDataFormat(elemType, ret)
 		if err != nil {
 			return err
 		}
 
-		dataValue.Set(*ret)
+		if (elemType.Kind() == reflect.Map && elemType.Elem().Kind() == reflect.Interface) ||
+			(elemType.Kind() == reflect.Ptr && elemType.Elem().Kind() == reflect.Map &&
+				elemType.Elem().Elem().Kind() == reflect.Interface) {
+			dataValue.Set(reflect.ValueOf(ret))
+			return nil
+		}
+
+		err = util.Interface2Interface(ret, result)
+		if err != nil {
+			return err
+		}
+	default:
+		ret, err := toListSingleData(ctx, db, tx, q, elemType)
+		if err != nil {
+			return err
+		}
+
+		if ret != nil {
+			dataValue.Set(*ret)
+		}
 	}
+
 	return nil
 }
 
@@ -384,9 +447,24 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 	}
 
 	dataValue = dataValue.Elem()
-	if dataValue.Type().Kind() == reflect.Slice {
+	switch dataValue.Type().Kind() {
+	case reflect.Slice:
 		return toListData(ctx, db, tx, q, result, flat, &dataValue)
-	} else if dataValue.Type().Kind() == reflect.Map || dataValue.Type().Kind() == reflect.Struct {
+	case reflect.Map:
+		keyT := dataValue.Type().Key()
+		if keyT.Kind() != reflect.String {
+			return ErrMapKeyType
+		}
+		valT := dataValue.Type().Elem()
+		ret, err := toFirstDataMap(ctx, db, tx, q, flat, keyT, valT)
+		if err != nil {
+			return err
+		}
+
+		if ret != nil {
+			dataValue.Set(*ret)
+		}
+	case reflect.Struct:
 		ret, err := toFirstMap(ctx, db, tx, q, flat)
 		if err != nil {
 			return err
@@ -404,8 +482,7 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 		if err != nil {
 			return err
 		}
-	} else {
-		// 单个基础类型
+	default:
 		ret, err := toFirstSingleData(ctx, db, tx, q, dataValue.Type())
 		if err != nil {
 			return err
@@ -419,11 +496,172 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 	return nil
 }
 
+func toFirstDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
+	kp, vp reflect.Type) (*reflect.Value, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	q.Limit = []uint{1}
+	if len(q.Limit) == 2 {
+		q.Limit[1] = 1
+	} else {
+		q.Limit = []uint{1}
+	}
+
+	var rows *sql.Rows
+	var err error
+	if tx != nil {
+		rows, err = tx.QueryContext(ctx, q.SQL())
+	} else if db != nil {
+		rows, err = db.QueryContext(ctx, q.SQL())
+	} else {
+		return nil, ErrClient
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := scanDataMapList(rows, flat, q.SelectColLinkStr, 1, kp, vp)
+	if err != nil {
+		return nil, err
+	}
+
+	if result.Len() <= 0 {
+		return nil, nil
+	}
+
+	elem := result.Index(0)
+	return &elem, nil
+}
+
+func toListDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
+	kp, vp reflect.Type) (*reflect.Value, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var rows *sql.Rows
+	var err error
+	if tx != nil {
+		rows, err = tx.QueryContext(ctx, q.SQL())
+	} else if db != nil {
+		rows, err = db.QueryContext(ctx, q.SQL())
+	} else {
+		return nil, ErrClient
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	cacheLen := defCacheSize
+	if len(q.Limit) == 1 {
+		cacheLen = int(q.Limit[0])
+	} else if len(q.Limit) == 2 {
+		cacheLen = int(q.Limit[1])
+	}
+
+	result, err := scanDataMapList(rows, flat, q.SelectColLinkStr, cacheLen, kp, vp)
+	if err != nil {
+		return nil, err
+	}
+
+	if result.Len() <= 0 {
+		return nil, nil
+	}
+
+	return result, nil
+}
+
+func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
+	cacheLen int, kp, vp reflect.Type) (result *reflect.Value, err error) {
+	if rows != nil {
+		defer func(rows *sql.Rows) {
+			err = rows.Close()
+			if err != nil {
+				log.Println(err.Error())
+			}
+		}(rows)
+	} else {
+		return nil, nil
+	}
+
+	cols, err := rows.Columns()
+	if err != nil {
+		log.Println(err.Error())
+		return nil, err
+	}
+
+	if len(cols) == 0 {
+		return nil, ErrTooFewColumn
+	}
+
+	colType, err := rows.ColumnTypes()
+	if err != nil {
+		log.Println(err.Error())
+		return nil, err
+	}
+
+	if cacheLen <= 0 {
+		cacheLen = defCacheSize
+	}
+
+	useDBType := vp.Kind() == reflect.Interface
+	elemList := reflect.MakeSlice(reflect.SliceOf(reflect.MapOf(kp, vp)), cacheLen, cacheLen)
+	result = &elemList
+
+	keyRow := make([]reflect.Value, len(cols))
+	for i := range cols {
+		keyRow[i] = reflect.ValueOf(cols[i])
+	}
+
+	valRow := make([]interface{}, len(cols))
+	if useDBType {
+		prepareValues(valRow, colType, cols)
+	} else {
+		for i := range cols {
+			valRow[i] = reflect.New(vp).Interface()
+		}
+	}
+
+	idx := 0
+	for {
+		if !rows.Next() {
+			break
+		}
+
+		err = rows.Scan(valRow...)
+		if err != nil {
+			log.Println(err.Error())
+			return nil, err
+		}
+
+		elem := reflect.MakeMapWithSize(reflect.MapOf(kp, vp), len(cols))
+		scanIntoReflectMap(&elem, valRow, keyRow)
+		//if len(m) > 0 && !flat {
+		//	formatMap(m, colLinkStr)
+		//}
+
+		elemList.Index(idx).Set(elem)
+		idx++
+	}
+
+	return result, nil
+}
+
 func toFirstSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp reflect.Type) (ret *reflect.Value, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	q.Limit = []uint{1}
+
+	if len(q.Limit) == 2 {
+		q.Limit[1] = 1
+	} else {
+		q.Limit = []uint{1}
+	}
+
 	var rows *sql.Rows
 	if tx != nil {
 		rows, err = tx.QueryContext(ctx, q.SQL())
