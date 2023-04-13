@@ -478,11 +478,11 @@ func scanBasicList(rows *sql.Rows, cacheLen int) (result []interface{}, err erro
 		return nil, ErrTooManyColumn
 	}
 
-	//colType, err := rows.ColumnTypes()
-	//if err != nil {
-	//	log.Println(err.Error())
-	//	return nil, err
-	//}
+	colType, err := rows.ColumnTypes()
+	if err != nil {
+		log.Println(err.Error())
+		return nil, err
+	}
 
 	if cacheLen <= 0 {
 		cacheLen = defCacheSize
@@ -494,16 +494,15 @@ func scanBasicList(rows *sql.Rows, cacheLen int) (result []interface{}, err erro
 		if !b {
 			break
 		}
-		//row := make([]interface{}, len(cols))
-		//prepareValues(row, colType, cols)
-		var val interface{}
-		err = rows.Scan(&val)
+		row := make([]interface{}, len(cols))
+		prepareValues(row, colType, cols)
+		err = rows.Scan(row...)
 		if err != nil {
 			log.Println(err.Error())
 			return nil, err
 		}
 
-		result = append(result, val)
+		result = append(result, row[0])
 	}
 
 	return result, nil
