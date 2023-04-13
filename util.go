@@ -7,13 +7,12 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"github.com/assembly-hub/basics/set"
+	"github.com/assembly-hub/basics/util"
 	"log"
 	"reflect"
 	"strings"
 	"time"
-
-	"github.com/assembly-hub/basics/set"
-	"github.com/assembly-hub/basics/util"
 )
 
 const (
@@ -67,14 +66,14 @@ func prepareValues(values []interface{}, columnTypes []*sql.ColumnType, columns 
 
 func newDataByDBType(columnType *sql.ColumnType) interface{} {
 	if columnType != nil && columnType.ScanType() != nil {
-		return reflect.New(columnType.ScanType()).Interface()
+		return reflect.New(reflect.PtrTo(columnType.ScanType())).Interface()
 	}
 	return new(interface{})
 }
 
 func scanIntoReflectMap(mapValue *reflect.Value, values []interface{}, columns []reflect.Value) {
 	for idx := range columns {
-		if reflectValue := reflect.Indirect(reflect.ValueOf(values[idx])); reflectValue.IsValid() {
+		if reflectValue := reflect.Indirect(reflect.Indirect(reflect.ValueOf(values[idx]))); reflectValue.IsValid() {
 			if valuer, ok := reflectValue.Interface().(driver.Valuer); ok {
 				val, _ := valuer.Value()
 				mapValue.SetMapIndex(columns[idx], reflect.ValueOf(val))
@@ -85,14 +84,14 @@ func scanIntoReflectMap(mapValue *reflect.Value, values []interface{}, columns [
 			}
 			mapValue.SetMapIndex(columns[idx], reflectValue)
 		} else {
-			reflectValue.SetMapIndex(columns[idx], reflect.ValueOf(nil))
+			// reflectValue.SetMapIndex(columns[idx], reflect.Zero(mapValue.Type().Elem()))
 		}
 	}
 }
 
 func scanIntoMap(mapValue map[string]interface{}, values []interface{}, columns []string) {
 	for idx, column := range columns {
-		if reflectValue := reflect.Indirect(reflect.ValueOf(values[idx])); reflectValue.IsValid() {
+		if reflectValue := reflect.Indirect(reflect.Indirect(reflect.ValueOf(values[idx]))); reflectValue.IsValid() {
 			if valuer, ok := reflectValue.Interface().(driver.Valuer); ok {
 				mapValue[column], _ = valuer.Value()
 				continue
@@ -201,13 +200,14 @@ func scanMapList(rows *sql.Rows, flat bool, colLinkStr string, cacheLen int) (re
 	}
 
 	result = make([]map[string]interface{}, 0, cacheLen)
+	row := make([]interface{}, len(cols))
+	prepareValues(row, colType, cols)
 	for {
 		b := rows.Next()
 		if !b {
 			break
 		}
-		row := make([]interface{}, len(cols))
-		prepareValues(row, colType, cols)
+
 		err = rows.Scan(row...)
 		if err != nil {
 			log.Println(err.Error())
@@ -465,22 +465,21 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 			dataValue.Set(*ret)
 		}
 	case reflect.Struct:
-		ret, err := toFirstMap(ctx, db, tx, q, flat)
-		if err != nil {
-			return err
+		structData := q.RefConf.GetTableCacheByTp(dataValue.Type())
+		if structData == nil {
+			ptr, err := computeStructData(dataValue.Type())
+			if err != nil {
+				return err
+			}
+			structData = ptr
 		}
-		err = jsonDataFormat(dataValue.Type(), ret)
+		ret, err := toFirstStruct(ctx, db, tx, q, flat, structData)
 		if err != nil {
 			return err
 		}
 
-		if dataValue.Type().Kind() == reflect.Map && dataValue.Type().Elem().Kind() == reflect.Interface {
-			dataValue.Set(reflect.ValueOf(ret))
-			return nil
-		}
-		err = util.Interface2Interface(ret, result)
-		if err != nil {
-			return err
+		if ret != nil {
+			dataValue.Set(*ret)
 		}
 	default:
 		ret, err := toFirstSingleData(ctx, db, tx, q, dataValue.Type())
@@ -609,6 +608,10 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 	}
 
 	useDBType := vp.Kind() == reflect.Interface
+	if !useDBType && !flat {
+		return nil, ErrParams
+	}
+
 	elemList := reflect.MakeSlice(reflect.SliceOf(reflect.MapOf(kp, vp)), cacheLen, cacheLen)
 	result = &elemList
 
@@ -622,7 +625,7 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 		prepareValues(valRow, colType, cols)
 	} else {
 		for i := range cols {
-			valRow[i] = reflect.New(vp).Interface()
+			valRow[i] = reflect.New(reflect.PtrTo(vp)).Interface()
 		}
 	}
 
@@ -638,17 +641,167 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 			return nil, err
 		}
 
-		elem := reflect.MakeMapWithSize(reflect.MapOf(kp, vp), len(cols))
-		scanIntoReflectMap(&elem, valRow, keyRow)
-		//if len(m) > 0 && !flat {
-		//	formatMap(m, colLinkStr)
-		//}
+		mapVal := reflect.MakeMapWithSize(reflect.MapOf(kp, vp), len(cols))
+		scanIntoReflectMap(&mapVal, valRow, keyRow)
+		if mapVal.Len() > 0 && !flat {
+			m := mapVal.Interface().(map[string]interface{})
+			formatMap(m, colLinkStr)
+		}
 
-		elemList.Index(idx).Set(elem)
+		elemList.Index(idx).Set(mapVal)
 		idx++
 	}
 
 	return result, nil
+}
+
+func toFirstStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
+	structData *tableStructData) (*reflect.Value, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	q.Limit = []uint{1}
+	if len(q.Limit) == 2 {
+		q.Limit[1] = 1
+	} else {
+		q.Limit = []uint{1}
+	}
+
+	var rows *sql.Rows
+	var err error
+	if tx != nil {
+		rows, err = tx.QueryContext(ctx, q.SQL())
+	} else if db != nil {
+		rows, err = db.QueryContext(ctx, q.SQL())
+	} else {
+		return nil, ErrClient
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := scanDataStructList(rows, flat, q.SelectColLinkStr, 1, structData)
+	if err != nil {
+		return nil, err
+	}
+
+	if result.Len() <= 0 {
+		return nil, nil
+	}
+
+	elem := result.Index(0)
+	return &elem, nil
+}
+
+func scanDataStructList(rows *sql.Rows, flat bool, colLinkStr string,
+	cacheLen int, structData *tableStructData) (result *reflect.Value, err error) {
+	if rows != nil {
+		defer func(rows *sql.Rows) {
+			err = rows.Close()
+			if err != nil {
+				log.Println(err.Error())
+			}
+		}(rows)
+	} else {
+		return nil, nil
+	}
+
+	cols, err := rows.Columns()
+	if err != nil {
+		log.Println(err.Error())
+		return nil, err
+	}
+
+	if len(cols) == 0 {
+		return nil, ErrTooFewColumn
+	}
+
+	//colType, err := rows.ColumnTypes()
+	//if err != nil {
+	//	log.Println(err.Error())
+	//	return nil, err
+	//}
+
+	if cacheLen <= 0 {
+		cacheLen = defCacheSize
+	}
+
+	elemList := reflect.MakeSlice(reflect.SliceOf(structData.StructType), cacheLen, cacheLen)
+	result = &elemList
+
+	strType := reflect.TypeOf([]byte{})
+	valRow := make([]interface{}, len(cols))
+	fieldList := make([][3]interface{}, len(cols))
+	realCol := make([]int, 0, len(cols))
+	for i := range cols {
+		if f, ok := structData.FieldMap[cols[i]]; ok {
+			realCol = append(realCol, i)
+			if f.Custom {
+				valRow[i] = reflect.New(reflect.PtrTo(strType)).Interface()
+				fieldList[i] = [3]interface{}{f.Index, true, f.DataType}
+				continue
+			}
+			valRow[i] = reflect.New(reflect.PtrTo(f.DataType)).Interface()
+			fieldList[i] = [3]interface{}{f.Index, false, f.DataType}
+		} else {
+			valRow[i] = new(interface{})
+		}
+	}
+
+	// struct字段与数据对应
+
+	//if useDBType {
+	//	prepareValues(valRow, colType, cols)
+	//} else {
+	//	for i := range cols {
+	//		valRow[i] = reflect.New(vp).Interface()
+	//	}
+	//}
+
+	idx := 0
+	for {
+		if !rows.Next() {
+			break
+		}
+
+		err = rows.Scan(valRow...)
+		if err != nil {
+			log.Println(err.Error())
+			return nil, err
+		}
+
+		objVal := elemList.Index(idx)
+		scanIntoReflectStruct(&objVal, valRow, fieldList, realCol)
+		idx++
+	}
+
+	return result, nil
+}
+
+func scanIntoReflectStruct(obj *reflect.Value, row []interface{}, fieldList [][3]interface{}, realCol []int) {
+	for _, idx := range realCol {
+		val := row[idx]
+		field := fieldList[idx]
+
+		if reflectVal := reflect.Indirect(reflect.Indirect(reflect.ValueOf(val))); reflectVal.IsValid() {
+			if field[1].(bool) {
+				strVal := reflectVal.Bytes()
+				if len(strVal) <= 0 {
+					continue
+				}
+				newVal := reflect.New(field[2].(reflect.Type))
+				err := json.Unmarshal(strVal, newVal.Interface())
+				if err != nil {
+					panic(err)
+				}
+				obj.Field(field[0].(int)).Set(newVal)
+			} else {
+				obj.Field(field[0].(int)).Set(reflectVal)
+			}
+		}
+	}
 }
 
 func toFirstSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp reflect.Type) (ret *reflect.Value, err error) {
@@ -755,7 +908,7 @@ func scanSingleList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *refl
 	elemList := reflect.MakeSlice(reflect.SliceOf(tp), cacheLen, cacheLen)
 	result = &elemList
 
-	val := reflect.New(tp).Interface()
+	val := reflect.New(reflect.PtrTo(tp)).Interface()
 	idx := 0
 	for {
 		if !rows.Next() {
@@ -769,7 +922,9 @@ func scanSingleList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *refl
 		}
 
 		elem := elemList.Index(idx)
-		setDataFuncPtr(&elem, val)
+		if reflectValue := reflect.Indirect(reflect.Indirect(reflect.ValueOf(val))); reflectValue.IsValid() {
+			elem.Set(reflectValue)
+		}
 		idx++
 	}
 

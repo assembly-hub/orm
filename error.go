@@ -14,3 +14,4 @@ var ErrDBFunc = errors.New("this method is not currently supported in the curren
 var ErrTooManyColumn = errors.New("too many columns")
 var ErrTooFewColumn = errors.New("too few columns")
 var ErrMapKeyType = errors.New("map's key type must be \"String\"")
+var ErrParams = errors.New("when \"flat=false\", the value of the map can only be interface{}")

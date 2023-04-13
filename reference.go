@@ -31,6 +31,21 @@ type tableRefData struct {
 	ToStructName string
 }
 
+type structField struct {
+	JSONName string
+	RawName  string
+	DataType reflect.Type
+	Ref      bool
+	Custom   bool
+	Offset   uintptr
+	Index    int
+}
+
+type tableStructData struct {
+	FieldMap   map[string]structField
+	StructType reflect.Type
+}
+
 type Reference struct {
 	dbType        int
 	dbConf        *dbCoreData
@@ -38,6 +53,7 @@ type Reference struct {
 	tableDef      map[string][]string
 	structToTable map[string]string
 	tableRef      map[string][]*tableRefData
+	tableCache    map[string]tableStructData
 }
 
 type formatColumnData struct {
@@ -61,11 +77,27 @@ func NewReference(dbType int) *Reference {
 	obj.tableDef = map[string][]string{}
 	obj.structToTable = map[string]string{}
 	obj.tableRef = map[string][]*tableRefData{}
+	obj.tableCache = map[string]tableStructData{}
 	return obj
 }
 
 func (c *Reference) GetDBType() int {
 	return c.dbType
+}
+
+func (c *Reference) GetTableCacheByTp(tableTp reflect.Type) *tableStructData {
+	structFullName := fmt.Sprintf("%s.%s", tableTp.PkgPath(), tableTp.Name())
+	if v, ok := c.tableCache[structFullName]; ok {
+		return &v
+	}
+	return nil
+}
+
+func (c *Reference) GetTableCacheByPath(tablePath string) *tableStructData {
+	if v, ok := c.tableCache[tablePath]; ok {
+		return &v
+	}
+	return nil
 }
 
 func (c *Reference) getDBConf() *dbCoreData {
@@ -78,6 +110,46 @@ func (c *Reference) getTableName(structName string) string {
 
 func (c *Reference) GetTableDef(table string) []string {
 	return c.tableDef[table]
+}
+
+func checkCustomField(tp reflect.Type) bool {
+	isBaseType := false
+	switch tp.Kind() {
+	case reflect.String,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		isBaseType = true
+	}
+	return !isBaseType
+}
+
+func computeStructData(tp reflect.Type) (*tableStructData, error) {
+	if tp.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("need struct type")
+	}
+	tbs := tableStructData{
+		StructType: tp,
+	}
+	tbs.FieldMap = make(map[string]structField)
+	for i := 0; i < tp.NumField(); i++ {
+		colName := tp.Field(i).Tag.Get("json")
+		if colName == "" || !tp.Field(i).IsExported() {
+			continue
+		}
+
+		ref := tp.Field(i).Tag.Get("ref")
+		tbs.FieldMap[colName] = structField{
+			JSONName: colName,
+			RawName:  tp.Field(i).Name,
+			DataType: tp.Field(i).Type,
+			Ref:      ref != "",
+			Custom:   checkCustomField(tp.Field(i).Type),
+			Offset:   tp.Field(i).Offset,
+			Index:    i,
+		}
+	}
+	return &tbs, nil
 }
 
 // AddTableDef 添加表定义
@@ -174,6 +246,11 @@ func (c *Reference) AddTableDef(table string, def interface{}) {
 		panic(fmt.Sprintf("table [%s] have no fields", table))
 	}
 	c.tableDef[table] = cols
+	tps, err := computeStructData(tp)
+	if err != nil {
+		panic(err)
+	}
+	c.tableCache[structFullName] = *tps
 }
 
 // BuildRefs 构建数据表关系，此操作必须在表定义完成时调用
