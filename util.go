@@ -625,6 +625,8 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 		}
 	}
 
+	mapType := reflect.MapOf(kp, vp)
+
 	idx := 0
 	for {
 		if !rows.Next() {
@@ -637,7 +639,7 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 			return nil, err
 		}
 
-		mapVal := reflect.MakeMapWithSize(reflect.MapOf(kp, vp), len(cols))
+		mapVal := reflect.MakeMapWithSize(mapType, len(cols))
 		scanIntoReflectMap(&mapVal, valRow, keyRow)
 		if mapVal.Len() > 0 && !flat {
 			m := mapVal.Interface().(map[string]interface{})
