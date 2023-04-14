@@ -594,7 +594,6 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 		cacheLen = defCacheSize
 	}
 
-	kp := elemType.Key()
 	vp := elemType.Elem()
 
 	useDBType := vp.Kind() == reflect.Interface
@@ -602,8 +601,8 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 		return nil, ErrParams
 	}
 
-	mapType := reflect.MapOf(kp, vp)
-	sliceType := mapType
+	// mapType := reflect.MapOf(kp, vp)
+	sliceType := elemType
 	if elemPtr {
 		sliceType = reflect.PtrTo(sliceType)
 	}
@@ -636,7 +635,7 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 			return nil, err
 		}
 
-		mapVal := reflect.MakeMapWithSize(mapType, len(cols))
+		mapVal := reflect.MakeMapWithSize(elemType, len(cols))
 		scanIntoReflectMap(&mapVal, valRow, keyRow)
 		if !flat && mapVal.Len() > 0 {
 			m := mapVal.Interface().(map[string]interface{})
@@ -644,7 +643,8 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 		}
 
 		if elemPtr {
-			v := reflect.NewAt(elemType, mapVal.UnsafePointer())
+			v := reflect.New(elemType)
+			v.Elem().Set(mapVal)
 			elemList = reflect.Append(elemList, v)
 		} else {
 			elemList = reflect.Append(elemList, mapVal)
