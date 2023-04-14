@@ -381,25 +381,21 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interf
 			dataValue.Set(*ret)
 		}
 	case reflect.Struct:
-		ret, err := toListMap(ctx, db, tx, q, flat)
-		if err != nil {
-			return err
+		structData := q.RefConf.GetTableCacheByTp(elemType)
+		if structData == nil {
+			ptr, err := computeStructData(elemType)
+			if err != nil {
+				return err
+			}
+			structData = ptr
 		}
-		err = jsonListDataFormat(elemType, ret)
+		ret, err := toListStruct(ctx, db, tx, q, flat, structData)
 		if err != nil {
 			return err
 		}
 
-		if (elemType.Kind() == reflect.Map && elemType.Elem().Kind() == reflect.Interface) ||
-			(elemType.Kind() == reflect.Ptr && elemType.Elem().Kind() == reflect.Map &&
-				elemType.Elem().Elem().Kind() == reflect.Interface) {
-			dataValue.Set(reflect.ValueOf(ret))
-			return nil
-		}
-
-		err = util.Interface2Interface(ret, result)
-		if err != nil {
-			return err
+		if ret != nil {
+			dataValue.Set(*ret)
 		}
 	case reflect.Ptr:
 		ret, err := toListMap(ctx, db, tx, q, flat)
@@ -655,6 +651,44 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 	return result, nil
 }
 
+func toListStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
+	structData *tableStructData) (*reflect.Value, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var rows *sql.Rows
+	var err error
+	if tx != nil {
+		rows, err = tx.QueryContext(ctx, q.SQL())
+	} else if db != nil {
+		rows, err = db.QueryContext(ctx, q.SQL())
+	} else {
+		return nil, ErrClient
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	cacheSize := defCacheSize
+	if len(q.Limit) == 1 {
+		cacheSize = int(q.Limit[0])
+	} else if len(q.Limit) == 2 {
+		cacheSize = int(q.Limit[1])
+	}
+
+	result, err := scanDataStructList(rows, flat, q.SelectColLinkStr, cacheSize, structData)
+	if err != nil {
+		return nil, err
+	}
+
+	if result.Len() <= 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
 func toFirstStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 	structData *tableStructData) (*reflect.Value, error) {
 	if ctx == nil {
@@ -718,12 +752,6 @@ func scanDataStructList(rows *sql.Rows, flat bool, colLinkStr string,
 		return nil, ErrTooFewColumn
 	}
 
-	//colType, err := rows.ColumnTypes()
-	//if err != nil {
-	//	log.Println(err.Error())
-	//	return nil, err
-	//}
-
 	if cacheLen <= 0 {
 		cacheLen = defCacheSize
 	}
@@ -749,16 +777,6 @@ func scanDataStructList(rows *sql.Rows, flat bool, colLinkStr string,
 			valRow[i] = new(interface{})
 		}
 	}
-
-	// struct字段与数据对应
-
-	//if useDBType {
-	//	prepareValues(valRow, colType, cols)
-	//} else {
-	//	for i := range cols {
-	//		valRow[i] = reflect.New(vp).Interface()
-	//	}
-	//}
 
 	idx := 0
 	for {
@@ -787,16 +805,44 @@ func scanIntoReflectStruct(obj *reflect.Value, row []interface{}, fieldList [][3
 
 		if reflectVal := reflect.Indirect(reflect.Indirect(reflect.ValueOf(val))); reflectVal.IsValid() {
 			if field[1].(bool) {
-				strVal := reflectVal.Bytes()
-				if len(strVal) <= 0 {
+				bytes := reflectVal.Bytes()
+				if len(bytes) <= 0 {
 					continue
 				}
-				newVal := reflect.New(field[2].(reflect.Type))
-				err := json.Unmarshal(strVal, newVal.Interface())
-				if err != nil {
-					panic(err)
+
+				customType := field[2].(reflect.Type)
+				switch customType.Kind() {
+				case reflect.Map:
+					newVal := reflect.MakeMap(customType)
+					v := newVal.Interface()
+					err := json.Unmarshal(bytes, &v)
+					if err != nil {
+						panic(err)
+					}
+					obj.Field(field[0].(int)).Set(newVal)
+				case reflect.Slice:
+					//newVal := reflect.MakeSlice(reflect.SliceOf(customType.Elem()), 0, 0)
+					//v := newVal.Interface()
+					//err := json.Unmarshal(bytes, &v)
+					//if err != nil {
+					//	panic(err)
+					//}
+					//obj.Field(field[0].(int)).Set(newVal)
+					v := obj.Field(field[0].(int)).Interface()
+					err := json.Unmarshal(bytes, &v)
+					if err != nil {
+						panic(err)
+					}
+				case reflect.String:
+					obj.Field(field[0].(int)).SetString(string(bytes))
+				default:
+					newVal := reflect.New(customType)
+					err := json.Unmarshal(bytes, newVal.Interface())
+					if err != nil {
+						panic(err)
+					}
+					obj.Field(field[0].(int)).Set(reflect.Indirect(newVal))
 				}
-				obj.Field(field[0].(int)).Set(newVal)
 			} else {
 				obj.Field(field[0].(int)).Set(reflectVal)
 			}

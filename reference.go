@@ -112,18 +112,6 @@ func (c *Reference) GetTableDef(table string) []string {
 	return c.tableDef[table]
 }
 
-func checkCustomField(tp reflect.Type) bool {
-	isBaseType := false
-	switch tp.Kind() {
-	case reflect.String,
-		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
-		reflect.Float32, reflect.Float64:
-		isBaseType = true
-	}
-	return !isBaseType
-}
-
 func computeStructData(tp reflect.Type) (*tableStructData, error) {
 	if tp.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("need struct type")
@@ -139,12 +127,13 @@ func computeStructData(tp reflect.Type) (*tableStructData, error) {
 		}
 
 		ref := tp.Field(i).Tag.Get("ref")
+		dataType := tp.Field(i).Tag.Get("type")
 		tbs.FieldMap[colName] = structField{
 			JSONName: colName,
 			RawName:  tp.Field(i).Name,
 			DataType: tp.Field(i).Type,
 			Ref:      ref != "",
-			Custom:   checkCustomField(tp.Field(i).Type),
+			Custom:   dataType != "",
 			Offset:   tp.Field(i).Offset,
 			Index:    i,
 		}
