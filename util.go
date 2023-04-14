@@ -7,31 +7,15 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"github.com/assembly-hub/basics/set"
-	"github.com/assembly-hub/basics/util"
-	"log"
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/assembly-hub/basics/util"
 )
 
 const (
-	structTypeName  = "type"
-	structTypeValue = "json"
-)
-
-type structJSONType int
-
-const (
-	jsonSlice = structJSONType(0)
-	jsonMap   = structJSONType(1)
-	jsonStr   = structJSONType(2)
-	jsonOther = structJSONType(3)
-)
-
-const (
-	defCacheSize  = 50
-	scanBatchSize = 100
+	defCacheSize = 50
 )
 
 func time2Str(t interface{}) string {
@@ -130,50 +114,6 @@ func formatMap(mapValue map[string]interface{}, selectColLinkStr string) {
 	}
 }
 
-func toListMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool) ([]map[string]interface{}, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	var rows *sql.Rows
-	var err error
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
-	} else {
-		return nil, ErrClient
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	if rows != nil {
-		defer func(rows *sql.Rows) {
-			closeErr := rows.Close()
-			if err != nil {
-				err = fmt.Errorf("%w %v", err, closeErr)
-			} else {
-				err = closeErr
-			}
-		}(rows)
-	}
-
-	cacheLen := defCacheSize
-	if len(q.Limit) == 1 {
-		cacheLen = int(q.Limit[0])
-	} else if len(q.Limit) == 2 {
-		cacheLen = int(q.Limit[1])
-	}
-
-	result, err := scanMapList(rows, flat, q.SelectColLinkStr, cacheLen)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
 func scanMapList(rows *sql.Rows, flat bool, colLinkStr string, cacheLen int) (result []map[string]interface{}, err error) {
 	if rows != nil {
 		defer func(rows *sql.Rows) {
@@ -227,144 +167,6 @@ func scanMapList(rows *sql.Rows, flat bool, colLinkStr string, cacheLen int) (re
 	}
 
 	return result, nil
-}
-
-func toFirstMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool) (map[string]interface{}, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	q.Limit = []uint{1}
-	if len(q.Limit) == 2 {
-		q.Limit[1] = 1
-	} else {
-		q.Limit = []uint{1}
-	}
-
-	var rows *sql.Rows
-	var err error
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
-	} else {
-		return nil, ErrClient
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	result, err := scanMapList(rows, flat, q.SelectColLinkStr, 1)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(result) <= 0 {
-		return nil, nil
-	}
-
-	return result[0], nil
-}
-
-func setDataFunc(dataVal *reflect.Value, v interface{}) {
-	switch v := v.(type) {
-	case string:
-		dataVal.SetString(v)
-	case int:
-		dataVal.SetInt(int64(v))
-	case int8:
-		dataVal.SetInt(int64(v))
-	case int16:
-		dataVal.SetInt(int64(v))
-	case int32:
-		dataVal.SetInt(int64(v))
-	case int64:
-		dataVal.SetInt(v)
-	case uint:
-		dataVal.SetUint(uint64(v))
-	case uint8:
-		dataVal.SetUint(uint64(v))
-	case uint16:
-		dataVal.SetUint(uint64(v))
-	case uint32:
-		dataVal.SetUint(uint64(v))
-	case uint64:
-		dataVal.SetUint(v)
-	case float32:
-		dataVal.SetFloat(float64(v))
-	case float64:
-		dataVal.SetFloat(v)
-	case []byte:
-		dataVal.SetBytes(v)
-	default:
-		dataVal.Set(reflect.ValueOf(v))
-	}
-}
-
-func setDataFuncPtr(dataVal *reflect.Value, v interface{}) {
-	switch v := v.(type) {
-	case *string:
-		dataVal.SetString(*v)
-	case *int:
-		dataVal.SetInt(int64(*v))
-	case *int8:
-		dataVal.SetInt(int64(*v))
-	case *int16:
-		dataVal.SetInt(int64(*v))
-	case *int32:
-		dataVal.SetInt(int64(*v))
-	case *int64:
-		dataVal.SetInt(*v)
-	case *uint:
-		dataVal.SetUint(uint64(*v))
-	case *uint8:
-		dataVal.SetUint(uint64(*v))
-	case *uint16:
-		dataVal.SetUint(uint64(*v))
-	case *uint32:
-		dataVal.SetUint(uint64(*v))
-	case *uint64:
-		dataVal.SetUint(*v)
-	case *float32:
-		dataVal.SetFloat(float64(*v))
-	case *float64:
-		dataVal.SetFloat(*v)
-	case *[]byte:
-		dataVal.SetBytes(*v)
-	default:
-		dataVal.Set(reflect.Indirect(reflect.ValueOf(v)))
-	}
-}
-
-func jsonListDataFormat(elem reflect.Type, ret []map[string]interface{}) error {
-	if elem.Kind() == reflect.Struct || (elem.Kind() == reflect.Ptr || elem.Elem().Kind() == reflect.Struct) {
-		colMap, err := structJSONField(elem)
-		if err != nil {
-			return err
-		}
-
-		err = formatListMapData(ret, colMap)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func jsonDataFormat(elem reflect.Type, ret map[string]interface{}) error {
-	if elem.Kind() == reflect.Struct {
-		colMap, err := structJSONField(elem)
-		if err != nil {
-			return err
-		}
-
-		err = formatMapData(ret, colMap)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{}, flat bool, dataValue *reflect.Value) error {
@@ -601,7 +403,6 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 		return nil, ErrParams
 	}
 
-	// mapType := reflect.MapOf(kp, vp)
 	sliceType := elemType
 	if elemPtr {
 		sliceType = reflect.PtrTo(sliceType)
@@ -681,7 +482,7 @@ func toListStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 		cacheSize = int(q.Limit[1])
 	}
 
-	result, err := scanDataStructList(rows, flat, q.SelectColLinkStr, cacheSize, structData, elemPtr)
+	result, err := scanDataStructList(rows, flat, q, cacheSize, structData, elemPtr)
 	if err != nil {
 		return nil, err
 	}
@@ -719,7 +520,7 @@ func toFirstStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 		return nil, err
 	}
 
-	result, err := scanDataStructList(rows, flat, q.SelectColLinkStr, 1, structData, false)
+	result, err := scanDataStructList(rows, flat, q, 1, structData, false)
 	if err != nil {
 		return nil, err
 	}
@@ -732,7 +533,43 @@ func toFirstStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 	return &elem, nil
 }
 
-func scanDataStructList(rows *sql.Rows, flat bool, colLinkStr string,
+func getSubStructData(refArr []string, structField *structField,
+	q *BaseQuery) (colType []reflect.Type, fieldIdx []int, b bool, err error) {
+	tempField := structField
+	for i := range refArr {
+		fieldIdx = append(fieldIdx, tempField.Index)
+		if tempField.Custom {
+			b = true
+		}
+
+		colType = append(colType, tempField.DataType)
+
+		if tempField.Ref {
+			tbStruct := q.RefConf.GetTableCacheByTp(tempField.DataType)
+			if tbStruct == nil {
+				tbStruct, err = computeStructData(tempField.DataType)
+				if err != nil {
+					return
+				}
+			}
+
+			ref := refArr[i+1]
+			f := tbStruct.FieldMap[ref]
+			tempField = &f
+		}
+	}
+
+	return
+}
+
+type innerStructField struct {
+	Custom    bool
+	Ref       bool
+	IndexList []int
+	TypeList  []reflect.Type
+}
+
+func scanDataStructList(rows *sql.Rows, flat bool, q *BaseQuery,
 	cacheLen int, structData *tableStructData, elemPtr bool) (result *reflect.Value, err error) {
 	if rows != nil {
 		defer func(rows *sql.Rows) {
@@ -769,20 +606,54 @@ func scanDataStructList(rows *sql.Rows, flat bool, colLinkStr string,
 	elemList := reflect.MakeSlice(reflect.SliceOf(sliceTy), 0, cacheLen)
 	result = &elemList
 
-	strType := reflect.TypeOf([]byte{})
+	customType := reflect.TypeOf([]byte{})
+
 	valRow := make([]interface{}, len(cols))
-	fieldList := make([][3]interface{}, len(cols))
+	fieldList := make([]innerStructField, len(cols))
 	realCol := make([]int, 0, len(cols))
 	for i := range cols {
 		if f, ok := structData.FieldMap[cols[i]]; ok {
 			realCol = append(realCol, i)
 			if f.Custom {
-				valRow[i] = reflect.New(reflect.PtrTo(strType)).Interface()
-				fieldList[i] = [3]interface{}{f.Index, true, f.DataType}
+				valRow[i] = reflect.New(reflect.PtrTo(customType)).Interface()
+				fieldList[i] = innerStructField{
+					IndexList: []int{f.Index},
+					Custom:    true,
+					TypeList:  []reflect.Type{f.DataType},
+				}
 				continue
 			}
+
 			valRow[i] = reflect.New(reflect.PtrTo(f.DataType)).Interface()
-			fieldList[i] = [3]interface{}{f.Index, false, f.DataType}
+			fieldList[i] = innerStructField{
+				IndexList: []int{f.Index},
+				TypeList:  []reflect.Type{f.DataType},
+			}
+		} else if !flat {
+			colArr := strings.Split(cols[i], q.SelectColLinkStr)
+			if len(colArr) <= 1 {
+				valRow[i] = new(interface{})
+				continue
+			}
+
+			f = structData.FieldMap[colArr[0]]
+			tpList, idxList, isCustom, err := getSubStructData(colArr, &f, q)
+			if err != nil {
+				return nil, err
+			}
+
+			fieldList[i] = innerStructField{
+				IndexList: idxList,
+				Custom:    isCustom,
+				Ref:       true,
+				TypeList:  tpList,
+			}
+			if isCustom {
+				valRow[i] = reflect.New(reflect.PtrTo(customType)).Interface()
+			} else {
+				valRow[i] = reflect.New(reflect.PtrTo(tpList[len(tpList)-1])).Interface()
+			}
+			realCol = append(realCol, i)
 		} else {
 			valRow[i] = new(interface{})
 		}
@@ -814,29 +685,65 @@ func scanDataStructList(rows *sql.Rows, flat bool, colLinkStr string,
 	return result, nil
 }
 
-func scanIntoReflectStruct(obj *reflect.Value, row []interface{}, fieldList [][3]interface{}, realCol []int) {
+func scanIntoReflectStruct(obj *reflect.Value, row []interface{}, fieldList []innerStructField, realCol []int) {
 	for _, idx := range realCol {
 		val := row[idx]
 		field := fieldList[idx]
 
 		if reflectVal := reflect.Indirect(reflect.Indirect(reflect.ValueOf(val))); reflectVal.IsValid() {
-			if field[1].(bool) {
-				bytes := reflectVal.Bytes()
-				if len(bytes) <= 0 {
-					continue
+			if field.Ref {
+				temp := obj
+				for i := 0; i < len(field.IndexList)-1; i++ {
+					fid := field.IndexList[i]
+					fv := temp.Field(fid)
+					tp := fv.Type()
+
+					isPtr := false
+					if tp.Kind() == reflect.Ptr {
+						isPtr = true
+						fv = fv.Elem()
+						tp = tp.Elem()
+					}
+
+					if fv.IsValid() {
+						temp = &fv
+					} else {
+						structVal := reflect.New(tp)
+						if isPtr {
+							temp.Field(fid).Set(structVal)
+							structVal = structVal.Elem()
+						} else {
+							structVal = structVal.Elem()
+							fv.Set(structVal)
+						}
+						temp = &structVal
+					}
 				}
 
-				customType := field[2].(reflect.Type)
-				newVal := reflect.New(customType)
-				err := json.Unmarshal(bytes, newVal.Interface())
-				if err != nil {
-					panic(err)
-				}
-				obj.Field(field[0].(int)).Set(newVal.Elem())
+				dataInStructField(temp, reflectVal, field.IndexList[len(field.IndexList)-1],
+					field.TypeList[len(field.IndexList)-1], field.Custom)
 			} else {
-				obj.Field(field[0].(int)).Set(reflectVal)
+				dataInStructField(obj, reflectVal, field.IndexList[0], field.TypeList[0], field.Custom)
 			}
 		}
+	}
+}
+
+func dataInStructField(obj *reflect.Value, reflectVal reflect.Value, fieldIndex int, dataType reflect.Type, custom bool) {
+	if custom {
+		bytes := reflectVal.Bytes()
+		if len(bytes) <= 0 {
+			return
+		}
+
+		newVal := reflect.New(dataType)
+		err := json.Unmarshal(bytes, newVal.Interface())
+		if err != nil {
+			panic(err)
+		}
+		obj.Field(fieldIndex).Set(newVal.Elem())
+	} else {
+		obj.Field(fieldIndex).Set(reflectVal)
 	}
 }
 
@@ -995,205 +902,6 @@ func count(ctx context.Context, db *DB, tx *Tx, q *BaseQuery) (int64, error) {
 	}
 
 	return util.Str2Int[int64](fmt.Sprintf("%v", result[0]["c"]))
-}
-
-func TransSession(ctx context.Context, db *DB, f func(ctx context.Context, tx *Tx) error) (err error) {
-	tx, errTx := db.BeginTx(ctx, nil)
-	if errTx != nil {
-		return errTx
-	}
-	defer func() {
-		if p := recover(); p != nil {
-			err1 := tx.Rollback()
-			err = fmt.Errorf("%v, Rollback=%w", p, err1)
-		}
-	}()
-
-	err = f(ctx, tx)
-	if err != nil {
-		panic(err)
-	}
-
-	return tx.Commit()
-}
-
-func structJSONField(dataType reflect.Type) (map[string]interface{}, error) {
-	structMap := make(map[string]interface{})
-	return structJSONKey(dataType, structMap)
-}
-
-func structJSONKey(dataType reflect.Type, structMap map[string]interface{}) (map[string]interface{}, error) {
-	if dataType.Kind() == reflect.Ptr {
-		dataType = dataType.Elem()
-	}
-
-	if dataType.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("数据必须为：struct、*struct")
-	}
-
-	structPath := fmt.Sprintf("%s.%s", dataType.PkgPath(), dataType.Name())
-	if data, ok := structMap[structPath]; ok {
-		return data.(map[string]interface{}), nil
-	}
-
-	colMap := map[string]interface{}{}
-	structMap[structPath] = colMap
-
-	for i := 0; i < dataType.NumField(); i++ {
-		tagName := dataType.Field(i).Tag.Get(structTypeName)
-		colName := dataType.Field(i).Tag.Get("json")
-		ref := dataType.Field(i).Tag.Get("ref")
-		if tagName == structTypeValue {
-			if dataType.Field(i).Type.Kind() == reflect.Slice {
-				colMap[colName] = jsonSlice
-			} else if dataType.Field(i).Type.Kind() == reflect.String {
-				colMap[colName] = jsonStr
-			} else if dataType.Field(i).Type.Kind() == reflect.Map || dataType.Field(i).Type.Kind() == reflect.Struct ||
-				(dataType.Field(i).Type.Kind() == reflect.Ptr && (dataType.Field(i).Type.Elem().Kind() == reflect.Map ||
-					dataType.Field(i).Type.Elem().Kind() == reflect.Struct)) {
-				colMap[colName] = jsonMap
-			} else {
-				colMap[colName] = jsonOther
-			}
-			continue
-		}
-
-		if ref != "" && dataType.Field(i).IsExported() {
-			val, err := structJSONKey(dataType.Field(i).Type, structMap)
-			if err != nil {
-				return nil, err
-			}
-
-			colMap[colName] = val
-		}
-	}
-
-	return colMap, nil
-}
-
-func formatMapData(data map[string]interface{}, colMap map[string]interface{}) error {
-	if len(colMap) <= 0 {
-		return nil
-	}
-
-	for k, v := range data {
-		if v == nil {
-			continue
-		}
-
-		if vv, ok := v.(map[string]interface{}); ok {
-			m := colMap[k]
-			if m == nil {
-				continue
-			} else if _, ok = m.(structJSONType); ok {
-				continue
-			}
-
-			if mm, ok := m.(map[string]interface{}); ok {
-				err := formatMapData(vv, mm)
-				if err != nil {
-					return err
-				}
-			}
-		}
-
-		if colData, ok := colMap[k]; ok {
-			tp, ok := colData.(structJSONType)
-			if !ok {
-				data[k] = v
-				continue
-			}
-
-			val := v.(string)
-			switch tp {
-			case jsonSlice:
-				if val == "" {
-					v = []interface{}{}
-				} else {
-					err := json.Unmarshal([]byte(val), &v)
-					if err != nil {
-						data[k] = nil
-						log.Println(err)
-						return err
-					}
-				}
-			case jsonMap:
-				if val == "" {
-					v = map[string]interface{}{}
-				} else {
-					err := json.Unmarshal([]byte(val), &v)
-					if err != nil {
-						data[k] = nil
-						log.Println(err)
-						return err
-					}
-				}
-			case jsonStr:
-				v = val
-			default:
-				err := json.Unmarshal([]byte(val), &v)
-				if err != nil {
-					data[k] = nil
-					log.Println(err)
-					return err
-				}
-			}
-			data[k] = v
-		}
-	}
-	return nil
-}
-
-func formatListMapData(data []map[string]interface{}, colMap map[string]interface{}) error {
-	if len(colMap) <= 0 {
-		return nil
-	}
-
-	for _, elem := range data {
-		err := formatMapData(elem, colMap)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func Struct2Map(raw interface{}, excludeKey ...string) map[string]interface{} {
-	dataValue := reflect.ValueOf(raw)
-	if dataValue.Type().Kind() != reflect.Struct && dataValue.Type().Kind() != reflect.Ptr {
-		panic("data type must be struct or struct ptr")
-	}
-
-	if dataValue.Type().Kind() == reflect.Ptr {
-		dataValue = dataValue.Elem()
-	}
-
-	if dataValue.Type().Kind() != reflect.Struct {
-		panic("data type must be struct or struct ptr")
-	}
-
-	s := set.Set[string]{}
-	s.Add(excludeKey...)
-
-	m := map[string]interface{}{}
-	for i := 0; i < dataValue.NumField(); i++ {
-		colName := dataValue.Type().Field(i).Tag.Get("json")
-		ref := dataValue.Type().Field(i).Tag.Get("ref")
-		tp := dataValue.Type().Field(i).Tag.Get("type")
-		if ref != "" || colName == "" || !dataValue.Type().Field(i).IsExported() {
-			continue
-		}
-
-		if !s.Has(colName) {
-			if tp == "json" {
-				m[colName] = util.InterfaceToString(dataValue.Field(i).Interface())
-			} else {
-				m[colName] = dataValue.Field(i).Interface()
-			}
-		}
-	}
-	return m
 }
 
 func connectStrArr(arr []string, linkStr string, start, end string) string {

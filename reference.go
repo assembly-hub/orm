@@ -86,6 +86,14 @@ func (c *Reference) GetDBType() int {
 }
 
 func (c *Reference) GetTableCacheByTp(tableTp reflect.Type) *tableStructData {
+	if tableTp.Kind() == reflect.Ptr {
+		tableTp = tableTp.Elem()
+	}
+
+	if tableTp.Kind() != reflect.Struct {
+		panic("flat=false, field type must be [*]struct")
+	}
+
 	structFullName := fmt.Sprintf("%s.%s", tableTp.PkgPath(), tableTp.Name())
 	if v, ok := c.tableCache[structFullName]; ok {
 		return &v
@@ -113,6 +121,10 @@ func (c *Reference) GetTableDef(table string) []string {
 }
 
 func computeStructData(tp reflect.Type) (*tableStructData, error) {
+	if tp.Kind() == reflect.Ptr {
+		tp = tp.Elem()
+	}
+
 	if tp.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("need struct type")
 	}
