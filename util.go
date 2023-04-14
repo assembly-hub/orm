@@ -74,12 +74,12 @@ func newDataByDBType(columnType *sql.ColumnType) interface{} {
 func scanIntoReflectMap(mapValue *reflect.Value, values []interface{}, columns []reflect.Value) {
 	for idx := range columns {
 		if reflectValue := reflect.Indirect(reflect.Indirect(reflect.ValueOf(values[idx]))); reflectValue.IsValid() {
-			if valuer, ok := reflectValue.Interface().(driver.Valuer); ok {
+			if b, ok := reflectValue.Interface().(sql.RawBytes); ok {
+				mapValue.SetMapIndex(columns[idx], reflect.ValueOf(string(b)))
+				continue
+			} else if valuer, ok := reflectValue.Interface().(driver.Valuer); ok {
 				val, _ := valuer.Value()
 				mapValue.SetMapIndex(columns[idx], reflect.ValueOf(val))
-				continue
-			} else if b, ok := reflectValue.Interface().(sql.RawBytes); ok {
-				mapValue.SetMapIndex(columns[idx], reflect.ValueOf(string(b)))
 				continue
 			}
 			mapValue.SetMapIndex(columns[idx], reflectValue)
@@ -150,9 +150,11 @@ func toListMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool) ([]
 
 	if rows != nil {
 		defer func(rows *sql.Rows) {
-			err = rows.Close()
+			closeErr := rows.Close()
 			if err != nil {
-				log.Println(err.Error())
+				err = fmt.Errorf("%w %v", err, closeErr)
+			} else {
+				err = closeErr
 			}
 		}(rows)
 	}
@@ -175,9 +177,11 @@ func toListMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool) ([]
 func scanMapList(rows *sql.Rows, flat bool, colLinkStr string, cacheLen int) (result []map[string]interface{}, err error) {
 	if rows != nil {
 		defer func(rows *sql.Rows) {
-			err = rows.Close()
+			closeErr := rows.Close()
 			if err != nil {
-				log.Println(err.Error())
+				err = fmt.Errorf("%w %v", err, closeErr)
+			} else {
+				err = closeErr
 			}
 		}(rows)
 	} else {
@@ -186,12 +190,12 @@ func scanMapList(rows *sql.Rows, flat bool, colLinkStr string, cacheLen int) (re
 
 	cols, err := rows.Columns()
 	if err != nil {
-		log.Println(err.Error())
+
 		return nil, err
 	}
 	colType, err := rows.ColumnTypes()
 	if err != nil {
-		log.Println(err.Error())
+
 		return nil, err
 	}
 
@@ -210,7 +214,7 @@ func scanMapList(rows *sql.Rows, flat bool, colLinkStr string, cacheLen int) (re
 
 		err = rows.Scan(row...)
 		if err != nil {
-			log.Println(err.Error())
+
 			return nil, err
 		}
 
@@ -365,14 +369,16 @@ func jsonDataFormat(elem reflect.Type, ret map[string]interface{}) error {
 
 func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{}, flat bool, dataValue *reflect.Value) error {
 	elemType := dataValue.Type().Elem()
+
+	elemPtr := false
+	if elemType.Kind() == reflect.Ptr {
+		elemType = elemType.Elem()
+		elemPtr = true
+	}
+
 	switch elemType.Kind() {
 	case reflect.Map:
-		keyT := elemType.Key()
-		if keyT.Kind() != reflect.String {
-			return ErrMapKeyType
-		}
-		valT := elemType.Elem()
-		ret, err := toListDataMap(ctx, db, tx, q, flat, keyT, valT)
+		ret, err := toListDataMap(ctx, db, tx, q, flat, elemType, elemPtr)
 		if err != nil {
 			return err
 		}
@@ -389,34 +395,13 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interf
 			}
 			structData = ptr
 		}
-		ret, err := toListStruct(ctx, db, tx, q, flat, structData)
+		ret, err := toListStruct(ctx, db, tx, q, flat, structData, elemPtr)
 		if err != nil {
 			return err
 		}
 
 		if ret != nil {
 			dataValue.Set(*ret)
-		}
-	case reflect.Ptr:
-		ret, err := toListMap(ctx, db, tx, q, flat)
-		if err != nil {
-			return err
-		}
-		err = jsonListDataFormat(elemType, ret)
-		if err != nil {
-			return err
-		}
-
-		if (elemType.Kind() == reflect.Map && elemType.Elem().Kind() == reflect.Interface) ||
-			(elemType.Kind() == reflect.Ptr && elemType.Elem().Kind() == reflect.Map &&
-				elemType.Elem().Elem().Kind() == reflect.Interface) {
-			dataValue.Set(reflect.ValueOf(ret))
-			return nil
-		}
-
-		err = util.Interface2Interface(ret, result)
-		if err != nil {
-			return err
 		}
 	default:
 		ret, err := toListSingleData(ctx, db, tx, q, elemType)
@@ -447,12 +432,7 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 	case reflect.Slice:
 		return toListData(ctx, db, tx, q, result, flat, &dataValue)
 	case reflect.Map:
-		keyT := dataValue.Type().Key()
-		if keyT.Kind() != reflect.String {
-			return ErrMapKeyType
-		}
-		valT := dataValue.Type().Elem()
-		ret, err := toFirstDataMap(ctx, db, tx, q, flat, keyT, valT)
+		ret, err := toFirstDataMap(ctx, db, tx, q, flat, dataValue.Type())
 		if err != nil {
 			return err
 		}
@@ -492,9 +472,14 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 }
 
 func toFirstDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
-	kp, vp reflect.Type) (*reflect.Value, error) {
+	elemType reflect.Type) (*reflect.Value, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+
+	kp := elemType.Key()
+	if kp.Kind() != reflect.String {
+		return nil, ErrMapKeyType
 	}
 
 	q.Limit = []uint{1}
@@ -518,7 +503,7 @@ func toFirstDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool
 		return nil, err
 	}
 
-	result, err := scanDataMapList(rows, flat, q.SelectColLinkStr, 1, kp, vp)
+	result, err := scanDataMapList(rows, flat, q.SelectColLinkStr, 1, elemType, false)
 	if err != nil {
 		return nil, err
 	}
@@ -532,9 +517,14 @@ func toFirstDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool
 }
 
 func toListDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
-	kp, vp reflect.Type) (*reflect.Value, error) {
+	elemType reflect.Type, elemPtr bool) (*reflect.Value, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+
+	kp := elemType.Key()
+	if kp.Kind() != reflect.String {
+		return nil, ErrMapKeyType
 	}
 
 	var rows *sql.Rows
@@ -558,7 +548,7 @@ func toListDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 		cacheLen = int(q.Limit[1])
 	}
 
-	result, err := scanDataMapList(rows, flat, q.SelectColLinkStr, cacheLen, kp, vp)
+	result, err := scanDataMapList(rows, flat, q.SelectColLinkStr, cacheLen, elemType, elemPtr)
 	if err != nil {
 		return nil, err
 	}
@@ -571,12 +561,14 @@ func toListDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 }
 
 func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
-	cacheLen int, kp, vp reflect.Type) (result *reflect.Value, err error) {
+	cacheLen int, elemType reflect.Type, elemPtr bool) (result *reflect.Value, err error) {
 	if rows != nil {
 		defer func(rows *sql.Rows) {
-			err = rows.Close()
+			closeErr := rows.Close()
 			if err != nil {
-				log.Println(err.Error())
+				err = fmt.Errorf("%w %v", err, closeErr)
+			} else {
+				err = closeErr
 			}
 		}(rows)
 	} else {
@@ -585,7 +577,7 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 
 	cols, err := rows.Columns()
 	if err != nil {
-		log.Println(err.Error())
+
 		return nil, err
 	}
 
@@ -595,7 +587,6 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 
 	colType, err := rows.ColumnTypes()
 	if err != nil {
-		log.Println(err.Error())
 		return nil, err
 	}
 
@@ -603,12 +594,21 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 		cacheLen = defCacheSize
 	}
 
+	kp := elemType.Key()
+	vp := elemType.Elem()
+
 	useDBType := vp.Kind() == reflect.Interface
 	if !useDBType && !flat {
 		return nil, ErrParams
 	}
 
-	elemList := reflect.MakeSlice(reflect.SliceOf(reflect.MapOf(kp, vp)), cacheLen, cacheLen)
+	mapType := reflect.MapOf(kp, vp)
+	sliceType := mapType
+	if elemPtr {
+		sliceType = reflect.PtrTo(sliceType)
+	}
+
+	elemList := reflect.MakeSlice(reflect.SliceOf(sliceType), 0, cacheLen)
 	result = &elemList
 
 	keyRow := make([]reflect.Value, len(cols))
@@ -625,9 +625,6 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 		}
 	}
 
-	mapType := reflect.MapOf(kp, vp)
-
-	idx := 0
 	for {
 		if !rows.Next() {
 			break
@@ -635,26 +632,30 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 
 		err = rows.Scan(valRow...)
 		if err != nil {
-			log.Println(err.Error())
+
 			return nil, err
 		}
 
 		mapVal := reflect.MakeMapWithSize(mapType, len(cols))
 		scanIntoReflectMap(&mapVal, valRow, keyRow)
-		if mapVal.Len() > 0 && !flat {
+		if !flat && mapVal.Len() > 0 {
 			m := mapVal.Interface().(map[string]interface{})
 			formatMap(m, colLinkStr)
 		}
 
-		elemList.Index(idx).Set(mapVal)
-		idx++
+		if elemPtr {
+			v := reflect.NewAt(elemType, mapVal.UnsafePointer())
+			elemList = reflect.Append(elemList, v)
+		} else {
+			elemList = reflect.Append(elemList, mapVal)
+		}
 	}
 
 	return result, nil
 }
 
 func toListStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
-	structData *tableStructData) (*reflect.Value, error) {
+	structData *tableStructData, elemPtr bool) (*reflect.Value, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -680,7 +681,7 @@ func toListStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 		cacheSize = int(q.Limit[1])
 	}
 
-	result, err := scanDataStructList(rows, flat, q.SelectColLinkStr, cacheSize, structData)
+	result, err := scanDataStructList(rows, flat, q.SelectColLinkStr, cacheSize, structData, elemPtr)
 	if err != nil {
 		return nil, err
 	}
@@ -718,7 +719,7 @@ func toFirstStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 		return nil, err
 	}
 
-	result, err := scanDataStructList(rows, flat, q.SelectColLinkStr, 1, structData)
+	result, err := scanDataStructList(rows, flat, q.SelectColLinkStr, 1, structData, false)
 	if err != nil {
 		return nil, err
 	}
@@ -732,12 +733,14 @@ func toFirstStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 }
 
 func scanDataStructList(rows *sql.Rows, flat bool, colLinkStr string,
-	cacheLen int, structData *tableStructData) (result *reflect.Value, err error) {
+	cacheLen int, structData *tableStructData, elemPtr bool) (result *reflect.Value, err error) {
 	if rows != nil {
 		defer func(rows *sql.Rows) {
-			err = rows.Close()
+			closeErr := rows.Close()
 			if err != nil {
-				log.Println(err.Error())
+				err = fmt.Errorf("%w %v", err, closeErr)
+			} else {
+				err = closeErr
 			}
 		}(rows)
 	} else {
@@ -746,7 +749,7 @@ func scanDataStructList(rows *sql.Rows, flat bool, colLinkStr string,
 
 	cols, err := rows.Columns()
 	if err != nil {
-		log.Println(err.Error())
+
 		return nil, err
 	}
 
@@ -758,7 +761,12 @@ func scanDataStructList(rows *sql.Rows, flat bool, colLinkStr string,
 		cacheLen = defCacheSize
 	}
 
-	elemList := reflect.MakeSlice(reflect.SliceOf(structData.StructType), cacheLen, cacheLen)
+	sliceTy := structData.StructType
+	if elemPtr {
+		sliceTy = reflect.PtrTo(sliceTy)
+	}
+
+	elemList := reflect.MakeSlice(reflect.SliceOf(sliceTy), 0, cacheLen)
 	result = &elemList
 
 	strType := reflect.TypeOf([]byte{})
@@ -780,7 +788,6 @@ func scanDataStructList(rows *sql.Rows, flat bool, colLinkStr string,
 		}
 	}
 
-	idx := 0
 	for {
 		if !rows.Next() {
 			break
@@ -788,13 +795,20 @@ func scanDataStructList(rows *sql.Rows, flat bool, colLinkStr string,
 
 		err = rows.Scan(valRow...)
 		if err != nil {
-			log.Println(err.Error())
+
 			return nil, err
 		}
 
-		objVal := elemList.Index(idx)
-		scanIntoReflectStruct(&objVal, valRow, fieldList, realCol)
-		idx++
+		objVal := reflect.New(structData.StructType)
+		structVal := objVal.Elem()
+		scanIntoReflectStruct(&structVal, valRow, fieldList, realCol)
+
+		if elemPtr {
+			elemList = reflect.Append(elemList, objVal)
+		} else {
+			elemList = reflect.Append(elemList, structVal)
+		}
+
 	}
 
 	return result, nil
@@ -813,38 +827,12 @@ func scanIntoReflectStruct(obj *reflect.Value, row []interface{}, fieldList [][3
 				}
 
 				customType := field[2].(reflect.Type)
-				switch customType.Kind() {
-				case reflect.Map:
-					newVal := reflect.MakeMap(customType)
-					v := newVal.Interface()
-					err := json.Unmarshal(bytes, &v)
-					if err != nil {
-						panic(err)
-					}
-					obj.Field(field[0].(int)).Set(newVal)
-				case reflect.Slice:
-					//newVal := reflect.MakeSlice(reflect.SliceOf(customType.Elem()), 0, 0)
-					//v := newVal.Interface()
-					//err := json.Unmarshal(bytes, &v)
-					//if err != nil {
-					//	panic(err)
-					//}
-					//obj.Field(field[0].(int)).Set(newVal)
-					v := obj.Field(field[0].(int)).Interface()
-					err := json.Unmarshal(bytes, &v)
-					if err != nil {
-						panic(err)
-					}
-				case reflect.String:
-					obj.Field(field[0].(int)).SetString(string(bytes))
-				default:
-					newVal := reflect.New(customType)
-					err := json.Unmarshal(bytes, newVal.Interface())
-					if err != nil {
-						panic(err)
-					}
-					obj.Field(field[0].(int)).Set(reflect.Indirect(newVal))
+				newVal := reflect.New(customType)
+				err := json.Unmarshal(bytes, newVal.Interface())
+				if err != nil {
+					panic(err)
 				}
+				obj.Field(field[0].(int)).Set(newVal.Elem())
 			} else {
 				obj.Field(field[0].(int)).Set(reflectVal)
 			}
@@ -928,9 +916,11 @@ func toListSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp refl
 func scanSingleList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *reflect.Value, err error) {
 	if rows != nil {
 		defer func(rows *sql.Rows) {
-			err = rows.Close()
+			closeErr := rows.Close()
 			if err != nil {
-				log.Println(err.Error())
+				err = fmt.Errorf("%w %v", err, closeErr)
+			} else {
+				err = closeErr
 			}
 		}(rows)
 	} else {
@@ -939,7 +929,6 @@ func scanSingleList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *refl
 
 	cols, err := rows.Columns()
 	if err != nil {
-		log.Println(err.Error())
 		return nil, err
 	}
 	if len(cols) == 0 {
@@ -953,27 +942,27 @@ func scanSingleList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *refl
 		cacheLen = defCacheSize
 	}
 
-	elemList := reflect.MakeSlice(reflect.SliceOf(tp), cacheLen, cacheLen)
+	elemList := reflect.MakeSlice(reflect.SliceOf(tp), 0, cacheLen)
 	result = &elemList
 
-	val := reflect.New(reflect.PtrTo(tp)).Interface()
-	idx := 0
+	nullVal := reflect.Zero(tp)
+	val := reflect.New(reflect.PtrTo(tp))
 	for {
 		if !rows.Next() {
 			break
 		}
 
-		err = rows.Scan(val)
+		err = rows.Scan(val.Interface())
 		if err != nil {
-			log.Println(err.Error())
+
 			return nil, err
 		}
 
-		elem := elemList.Index(idx)
-		if reflectValue := reflect.Indirect(reflect.Indirect(reflect.ValueOf(val))); reflectValue.IsValid() {
-			elem.Set(reflectValue)
+		if reflectValue := reflect.Indirect(reflect.Indirect(val)); reflectValue.IsValid() {
+			elemList = reflect.Append(elemList, reflectValue)
+		} else {
+			elemList = reflect.Append(elemList, nullVal)
 		}
-		idx++
 	}
 
 	return result, nil

@@ -9,6 +9,10 @@ func init() {
 	globalVerifyObj = newDefaultVerify()
 }
 
+func CloseVerify() {
+	globalVerifyObj = newCloseVerify()
+}
+
 func SetGlobalVerify(v Verify) {
 	if v == nil {
 		panic("verify cannot nil")
@@ -20,6 +24,26 @@ type Verify interface {
 	VerifyTableName(name string) error
 	VerifyFieldName(name string) error
 	VerifyTagName(name string) error
+}
+
+type closeVerify struct {
+}
+
+func (c closeVerify) VerifyTableName(name string) error {
+	return nil
+}
+
+func (c closeVerify) VerifyFieldName(name string) error {
+	return nil
+}
+
+func (c closeVerify) VerifyTagName(name string) error {
+	return nil
+}
+
+func newCloseVerify() Verify {
+	v := new(closeVerify)
+	return v
 }
 
 type defaultVerify struct {
