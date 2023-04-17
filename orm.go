@@ -18,7 +18,7 @@ const (
 	selectColLinkStr  = "__"
 	defaultPrimaryKey = "id"
 	defaultBatchSize  = 200
-	defaultLimitMax   = 5000
+	defaultLimitMax   = 50
 )
 
 var (
@@ -158,7 +158,7 @@ func initORM() *ORM {
 	dao.selectColLinkStr = "_"
 	dao.Q = newDBQuery()
 	dao.primaryKey = defaultPrimaryKey
-	dao.limit = defaultLimitMax
+	dao.limit = 0
 	return dao
 }
 
@@ -508,7 +508,7 @@ func (orm *ORM) ToData(result interface{}, flat bool) (err error) {
 		GroupBy:          orm.Q.GroupBy,
 		Having:           orm.Q.Having,
 	}
-	if len(q.Limit) <= 0 {
+	if len(q.Limit) <= 0 && orm.limit > 0 {
 		q.Limit = []uint{orm.limit}
 	}
 	if !flat {
@@ -516,6 +516,49 @@ func (orm *ORM) ToData(result interface{}, flat bool) (err error) {
 	}
 
 	return toData(orm.ctx, orm.db, orm.tx, &q, result, flat)
+}
+
+func (orm *ORM) FetchData(dataType interface{}, flat bool, fetch func(row interface{}) bool) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch p := p.(type) {
+			case error:
+				err = p
+			default:
+				err = fmt.Errorf("%v", p)
+			}
+		}
+	}()
+
+	if !orm.keepQuery {
+		defer func() {
+			orm.ClearCache()
+		}()
+	}
+
+	q := BaseQuery{
+		CustomSQL:        orm.customSQL,
+		PrivateKey:       orm.primaryKey,
+		RefConf:          orm.ref,
+		TableName:        orm.tableName,
+		Where:            orm.Q.Where,
+		SelectColLinkStr: orm.selectColLinkStr,
+		Order:            orm.Q.Order,
+		Distinct:         orm.Q.Distinct,
+		SelectForUpdate:  orm.Q.SelectForUpdate,
+		Limit:            orm.Q.Limit,
+		Select:           orm.Q.Select,
+		GroupBy:          orm.Q.GroupBy,
+		Having:           orm.Q.Having,
+	}
+	if len(q.Limit) <= 0 && orm.limit > 0 {
+		q.Limit = []uint{orm.limit}
+	}
+	if !flat {
+		q.SelectColLinkStr = selectColLinkStr
+	}
+
+	return fetchData(orm.ctx, orm.db, orm.tx, &q, dataType, flat, fetch)
 }
 
 func (orm *ORM) ExecuteSQL(customSQL string) (affectedRow int64, err error) {
