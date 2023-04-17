@@ -75,15 +75,15 @@ func (p *queryModel) countDB() string {
 		sql.WriteString(p.andSQL(p.Having))
 	}
 
-	rawSql := sql.String()
+	rawSQL := sql.String()
 	sql.Reset()
-	sql.Grow(len(rawSql) + 50)
+	sql.Grow(len(rawSQL) + 50)
 	sql.WriteString("SELECT COUNT(*) as ")
 	sql.WriteString(p.DBCore.EscStart)
 	sql.WriteByte('c')
 	sql.WriteString(p.DBCore.EscEnd)
 	sql.WriteString(" from (")
-	sql.WriteString(rawSql)
+	sql.WriteString(rawSQL)
 	if p.DBCore.DBType == dbtype.Oracle {
 		sql.WriteString(") ")
 	} else {

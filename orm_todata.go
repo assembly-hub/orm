@@ -83,7 +83,7 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool, da
 			dataValue.Set(*ret)
 		}
 	case reflect.Struct:
-		structData := q.RefConf.GetTableCacheByTp(elemType)
+		structData := q.RefConf.getTableCacheByTp(elemType)
 		if structData == nil {
 			ptr, err := computeStructData(elemType)
 			if err != nil {
@@ -138,7 +138,7 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 			dataValue.Set(*ret)
 		}
 	case reflect.Struct:
-		structData := q.RefConf.GetTableCacheByTp(tp)
+		structData := q.RefConf.getTableCacheByTp(tp)
 		if structData == nil {
 			ptr, err := computeStructData(tp)
 			if err != nil {

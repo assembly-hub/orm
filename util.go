@@ -126,7 +126,7 @@ func getSubStructData(refArr []string, structField *structField,
 		colType = append(colType, tempField.DataType)
 
 		if tempField.Ref {
-			tbStruct := q.RefConf.GetTableCacheByTp(tempField.DataType)
+			tbStruct := q.RefConf.getTableCacheByTp(tempField.DataType)
 			if tbStruct == nil {
 				tbStruct, err = computeStructData(tempField.DataType)
 				if err != nil {

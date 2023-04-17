@@ -23,7 +23,7 @@ func fetchData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, dataType inter
 	case reflect.Map:
 		return toFetchDataMap(ctx, db, tx, q, flat, dtType, fetch)
 	case reflect.Struct:
-		structData := q.RefConf.GetTableCacheByTp(dtType)
+		structData := q.RefConf.getTableCacheByTp(dtType)
 		if structData == nil {
 			ptr, err := computeStructData(dtType)
 			if err != nil {

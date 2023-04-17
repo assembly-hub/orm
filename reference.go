@@ -85,7 +85,7 @@ func (c *Reference) GetDBType() int {
 	return c.dbType
 }
 
-func (c *Reference) GetTableCacheByTp(tableTp reflect.Type) *tableStructData {
+func (c *Reference) getTableCacheByTp(tableTp reflect.Type) *tableStructData {
 	if tableTp.Kind() == reflect.Ptr {
 		tableTp = tableTp.Elem()
 	}
@@ -101,7 +101,7 @@ func (c *Reference) GetTableCacheByTp(tableTp reflect.Type) *tableStructData {
 	return nil
 }
 
-func (c *Reference) GetTableCacheByPath(tablePath string) *tableStructData {
+func (c *Reference) getTableCacheByPath(tablePath string) *tableStructData {
 	if v, ok := c.tableCache[tablePath]; ok {
 		return &v
 	}
