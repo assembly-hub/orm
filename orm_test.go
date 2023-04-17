@@ -14,7 +14,7 @@ type Table1 struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 	// type: 指定字段接收数据类型，目前为固定值：json
-	JSON []map[string]interface{} `json:"json" type:"json"`
+	JSON []int `json:"json" type:"json"`
 	// tb：查询tag，跨表查询可以用
 	// ref：关联配置，left是关联逻辑；tb_id=id为关联条件，多个逗号隔开
 	// 如：left;tb_id=id,name=name，其中tb_id为当前表字段，id为被关联表字段，以此类推
@@ -47,6 +47,19 @@ func init() {
 	ref.AddTableDef("table3", Table3{})
 	// 编译表关系
 	ref.BuildRefs()
+}
+
+func TestORM_Query(t *testing.T) {
+	var db *sql.DB = &sql.DB{}
+	orm := NewORM(context.Background(), "table1", db, ref)
+	orm.Select("tb2.count(id) as c", "id")
+	orm.Wheres(map[string]interface{}{
+		"id__gt":            0,
+		"tb2.count(id)__gt": 0,
+	})
+	orm.GroupBy("tb2.name").Having("#c__gt", 1)
+
+	fmt.Println(orm.ToSQL(false))
 }
 
 func TestORM(t *testing.T) {
