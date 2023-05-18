@@ -9,6 +9,7 @@ import (
 
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
+	"github.com/assembly-hub/db"
 	"github.com/assembly-hub/task/execute"
 
 	"github.com/assembly-hub/orm/dbtype"
@@ -67,8 +68,8 @@ type ORM struct {
 	// 用户自定义SQL，优先级最高
 	customSQL string
 	tableName string
-	db        *DB
-	tx        *Tx
+	executor  db.Executor
+	tx        db.Tx
 	ref       *Reference
 
 	ctx context.Context
@@ -105,7 +106,7 @@ type Paging struct {
 	PageTotal int `json:"page_total"` //总页数
 }
 
-func NewORM(ctx context.Context, tableName string, db *DB, ref *Reference) *ORM {
+func NewORM(ctx context.Context, tableName string, executor db.Executor, ref *Reference) *ORM {
 	err := globalVerifyObj.VerifyTableName(tableName)
 	if err != nil {
 		panic(err)
@@ -115,19 +116,19 @@ func NewORM(ctx context.Context, tableName string, db *DB, ref *Reference) *ORM 
 		panic("database reference is nil")
 	}
 
-	if db == nil {
-		panic("db is nil")
+	if executor == nil {
+		panic("executor is nil")
 	}
 
 	dao := initORM()
 	dao.tableName = tableName
-	dao.db = db
+	dao.executor = executor
 	dao.ref = ref
 	dao.ctx = ctx
 	return dao
 }
 
-func NewORMWithTx(ctx context.Context, tableName string, tx *Tx, ref *Reference) *ORM {
+func NewORMWithTx(ctx context.Context, tableName string, tx db.Tx, ref *Reference) *ORM {
 	err := globalVerifyObj.VerifyTableName(tableName)
 	if err != nil {
 		panic(err)
@@ -230,7 +231,7 @@ func (orm *ORM) Query(pair ...interface{}) *ORM {
 func (orm *ORM) Clone(ctx context.Context) *ORM {
 	dao := new(ORM)
 	dao.tableName = orm.tableName
-	dao.db = orm.db
+	dao.executor = orm.executor
 	dao.tx = orm.tx
 	dao.ref = orm.ref
 	dao.selectColLinkStr = orm.selectColLinkStr
@@ -515,7 +516,12 @@ func (orm *ORM) ToData(result interface{}, flat bool) (err error) {
 		q.SelectColLinkStr = selectColLinkStr
 	}
 
-	return toData(orm.ctx, orm.db, orm.tx, &q, result, flat)
+	var sqlDB db.BaseExecutor = orm.tx
+	if sqlDB == nil {
+		sqlDB = orm.executor
+	}
+
+	return toData(orm.ctx, sqlDB, &q, result, flat)
 }
 
 func (orm *ORM) FetchData(dataType interface{}, flat bool, fetch func(row interface{}) bool) (err error) {
@@ -558,7 +564,11 @@ func (orm *ORM) FetchData(dataType interface{}, flat bool, fetch func(row interf
 		q.SelectColLinkStr = selectColLinkStr
 	}
 
-	return fetchData(orm.ctx, orm.db, orm.tx, &q, dataType, flat, fetch)
+	var sqlDB db.BaseExecutor = orm.tx
+	if sqlDB == nil {
+		sqlDB = orm.executor
+	}
+	return fetchData(orm.ctx, sqlDB, &q, dataType, flat, fetch)
 }
 
 func (orm *ORM) ExecuteSQL(customSQL string) (affectedRow int64, err error) {
@@ -576,8 +586,8 @@ func (orm *ORM) ExecuteSQL(customSQL string) (affectedRow int64, err error) {
 	var ret sql.Result
 	if orm.tx != nil {
 		ret, err = orm.tx.ExecContext(orm.ctx, customSQL)
-	} else if orm.db != nil {
-		ret, err = orm.db.ExecContext(orm.ctx, customSQL)
+	} else if orm.executor != nil {
+		ret, err = orm.executor.ExecContext(orm.ctx, customSQL)
 	} else {
 		return 0, ErrClient
 	}
@@ -626,7 +636,11 @@ func (orm *ORM) Exist() (b bool, err error) {
 	}
 
 	var c int64
-	err = toData(orm.ctx, orm.db, orm.tx, &q, &c, false)
+	var sqlDB db.BaseExecutor = orm.tx
+	if sqlDB == nil {
+		sqlDB = orm.executor
+	}
+	err = toData(orm.ctx, sqlDB, &q, &c, false)
 	if err != nil {
 		return false, err
 	}
@@ -674,7 +688,11 @@ func (orm *ORM) Count(clearCache bool) (c int64, err error) {
 		Having:           orm.Q.Having,
 	}
 
-	return count(orm.ctx, orm.db, orm.tx, &q)
+	var sqlDB db.BaseExecutor = orm.tx
+	if sqlDB == nil {
+		sqlDB = orm.executor
+	}
+	return count(orm.ctx, sqlDB, &q)
 }
 
 func (orm *ORM) InsertOne(data interface{}) (insertID int64, err error) {
@@ -695,10 +713,13 @@ func (orm *ORM) InsertOne(data interface{}) (insertID int64, err error) {
 	}
 
 	var ret sql.Result
-	if orm.tx != nil {
-		ret, err = orm.tx.ExecContext(orm.ctx, insertSQL)
-	} else if orm.db != nil {
-		ret, err = orm.db.ExecContext(orm.ctx, insertSQL)
+	var sqlDB db.BaseExecutor = orm.tx
+	if sqlDB == nil {
+		sqlDB = orm.executor
+	}
+
+	if sqlDB != nil {
+		ret, err = sqlDB.ExecContext(orm.ctx, insertSQL)
 	} else {
 		return 0, ErrClient
 	}
@@ -742,8 +763,8 @@ func (orm *ORM) InsertMany(data []interface{}, trans bool) (affected int64, inse
 		return 0, nil, fmt.Errorf("no data sql")
 	}
 
-	if trans && orm.db != nil {
-		tx, errTx := orm.db.BeginTx(orm.ctx, nil)
+	if trans && orm.executor != nil {
+		tx, errTx := orm.executor.BeginTx(orm.ctx, nil)
 		if errTx != nil {
 			return 0, nil, errTx
 		}
@@ -787,8 +808,8 @@ func (orm *ORM) InsertMany(data []interface{}, trans bool) (affected int64, inse
 		for _, sqlObj := range sqlArr {
 			if orm.tx != nil {
 				execContext, err = orm.tx.ExecContext(orm.ctx, sqlObj)
-			} else if orm.db != nil {
-				execContext, err = orm.db.ExecContext(orm.ctx, sqlObj)
+			} else if orm.executor != nil {
+				execContext, err = orm.executor.ExecContext(orm.ctx, sqlObj)
 			} else {
 				return 0, nil, ErrClient
 			}
@@ -888,10 +909,13 @@ func (orm *ORM) UpsertOne(data interface{}) (insertID int64, err error) {
 	}
 
 	var ret sql.Result
-	if orm.tx != nil {
-		ret, err = orm.tx.ExecContext(orm.ctx, insertSQL)
-	} else if orm.db != nil {
-		ret, err = orm.db.ExecContext(orm.ctx, insertSQL)
+	var sqlDB db.BaseExecutor = orm.tx
+	if sqlDB == nil {
+		sqlDB = orm.executor
+	}
+
+	if sqlDB != nil {
+		ret, err = sqlDB.ExecContext(orm.ctx, insertSQL)
 	} else {
 		return 0, ErrClient
 	}
@@ -935,8 +959,8 @@ func (orm *ORM) UpsertMany(data []interface{}, trans bool) (affected int64, inse
 		return 0, nil, fmt.Errorf("no data sql")
 	}
 
-	if trans && orm.db != nil {
-		tx, errTx := orm.db.BeginTx(orm.ctx, nil)
+	if trans && orm.executor != nil {
+		tx, errTx := orm.executor.BeginTx(orm.ctx, nil)
 		if errTx != nil {
 			return 0, nil, errTx
 		}
@@ -980,8 +1004,8 @@ func (orm *ORM) UpsertMany(data []interface{}, trans bool) (affected int64, inse
 		for _, sqlObj := range sqlArr {
 			if orm.tx != nil {
 				execContext, err = orm.tx.ExecContext(orm.ctx, sqlObj)
-			} else if orm.db != nil {
-				execContext, err = orm.db.ExecContext(orm.ctx, sqlObj)
+			} else if orm.executor != nil {
+				execContext, err = orm.executor.ExecContext(orm.ctx, sqlObj)
 			} else {
 				return 0, nil, ErrClient
 			}
@@ -1094,8 +1118,8 @@ func (orm *ORM) SaveMany(data []interface{}, trans bool) (affected int64, err er
 		sqlArr = append(sqlArr, upsertSQL)
 	}
 
-	if trans && orm.db != nil {
-		tx, errTx := orm.db.BeginTx(orm.ctx, nil)
+	if trans && orm.executor != nil {
+		tx, errTx := orm.executor.BeginTx(orm.ctx, nil)
 		if errTx != nil {
 			return 0, errTx
 		}
@@ -1131,8 +1155,8 @@ func (orm *ORM) SaveMany(data []interface{}, trans bool) (affected int64, err er
 		for _, sqlObj := range sqlArr {
 			if orm.tx != nil {
 				execContext, err = orm.tx.ExecContext(orm.ctx, sqlObj)
-			} else if orm.db != nil {
-				execContext, err = orm.db.ExecContext(orm.ctx, sqlObj)
+			} else if orm.executor != nil {
+				execContext, err = orm.executor.ExecContext(orm.ctx, sqlObj)
 			} else {
 				return 0, ErrClient
 			}
@@ -1204,10 +1228,13 @@ func (orm *ORM) UpdateByWhere(update map[string]interface{}, where Where) (affec
 	updateSQL = fmt.Sprintf(updateSQL, orm.tableName, util.JoinArr(updateSet, ","))
 
 	var ret sql.Result
-	if orm.tx != nil {
-		ret, err = orm.tx.ExecContext(orm.ctx, updateSQL)
-	} else if orm.db != nil {
-		ret, err = orm.db.ExecContext(orm.ctx, updateSQL)
+	var sqlDB db.BaseExecutor = orm.tx
+	if sqlDB == nil {
+		sqlDB = orm.executor
+	}
+
+	if sqlDB != nil {
+		ret, err = sqlDB.ExecContext(orm.ctx, updateSQL)
 	} else {
 		return 0, ErrClient
 	}
@@ -1248,8 +1275,8 @@ func (orm *ORM) UpdateMany(data []interface{}, trans bool) (affected int64, err 
 		return 0, fmt.Errorf("no data sql")
 	}
 
-	if trans && orm.db != nil {
-		tx, errTx := orm.db.BeginTx(orm.ctx, nil)
+	if trans && orm.executor != nil {
+		tx, errTx := orm.executor.BeginTx(orm.ctx, nil)
 		if errTx != nil {
 			return 0, errTx
 		}
@@ -1285,8 +1312,8 @@ func (orm *ORM) UpdateMany(data []interface{}, trans bool) (affected int64, err 
 		for _, sqlObj := range sqlArr {
 			if orm.tx != nil {
 				execContext, err = orm.tx.ExecContext(orm.ctx, sqlObj)
-			} else if orm.db != nil {
-				execContext, err = orm.db.ExecContext(orm.ctx, sqlObj)
+			} else if orm.executor != nil {
+				execContext, err = orm.executor.ExecContext(orm.ctx, sqlObj)
 			} else {
 				return 0, ErrClient
 			}
@@ -1323,10 +1350,13 @@ func (orm *ORM) UpdateOne(data interface{}) (affected int64, err error) {
 	}
 
 	var execContext sql.Result
-	if orm.tx != nil {
-		execContext, err = orm.tx.ExecContext(orm.ctx, updateSQL)
-	} else if orm.db != nil {
-		execContext, err = orm.db.ExecContext(orm.ctx, updateSQL)
+	var sqlDB db.BaseExecutor = orm.tx
+	if sqlDB == nil {
+		sqlDB = orm.executor
+	}
+
+	if sqlDB != nil {
+		execContext, err = sqlDB.ExecContext(orm.ctx, updateSQL)
 	} else {
 		return 0, ErrClient
 	}
@@ -1356,10 +1386,13 @@ func (orm *ORM) ReplaceOne(data interface{}) (affected int64, err error) {
 	}
 
 	var execContext sql.Result
-	if orm.tx != nil {
-		execContext, err = orm.tx.ExecContext(orm.ctx, replaceSQL)
-	} else if orm.db != nil {
-		execContext, err = orm.db.ExecContext(orm.ctx, replaceSQL)
+	var sqlDB db.BaseExecutor = orm.tx
+	if sqlDB == nil {
+		sqlDB = orm.executor
+	}
+
+	if sqlDB != nil {
+		execContext, err = sqlDB.ExecContext(orm.ctx, replaceSQL)
 	} else {
 		return 0, ErrClient
 	}
@@ -1402,8 +1435,8 @@ func (orm *ORM) ReplaceMany(data []interface{}, trans bool) (affected int64, ins
 		return 0, nil, fmt.Errorf("no data sql")
 	}
 
-	if trans && orm.db != nil {
-		tx, errTx := orm.db.BeginTx(orm.ctx, nil)
+	if trans && orm.executor != nil {
+		tx, errTx := orm.executor.BeginTx(orm.ctx, nil)
 		if errTx != nil {
 			return 0, nil, errTx
 		}
@@ -1447,8 +1480,8 @@ func (orm *ORM) ReplaceMany(data []interface{}, trans bool) (affected int64, ins
 		for _, sqlObj := range sqlArr {
 			if orm.tx != nil {
 				execContext, err = orm.tx.ExecContext(orm.ctx, sqlObj)
-			} else if orm.db != nil {
-				execContext, err = orm.db.ExecContext(orm.ctx, sqlObj)
+			} else if orm.executor != nil {
+				execContext, err = orm.executor.ExecContext(orm.ctx, sqlObj)
 			} else {
 				return 0, nil, ErrClient
 			}
@@ -1563,10 +1596,13 @@ func (orm *ORM) DeleteByWhere(where map[string]interface{}) (affected int64, err
 	}
 
 	var ret sql.Result
-	if orm.tx != nil {
-		ret, err = orm.tx.ExecContext(orm.ctx, delSQL.String())
-	} else if orm.db != nil {
-		ret, err = orm.db.ExecContext(orm.ctx, delSQL.String())
+	var sqlDB db.BaseExecutor = orm.tx
+	if sqlDB == nil {
+		sqlDB = orm.executor
+	}
+
+	if sqlDB != nil {
+		ret, err = sqlDB.ExecContext(orm.ctx, delSQL.String())
 	} else {
 		return 0, ErrClient
 	}

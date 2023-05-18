@@ -220,8 +220,8 @@ func (orm *ORM) checkUK(colSet set.Set[string]) bool {
 }
 
 func (orm *ORM) executeSQL(sqlArr []interface{}, trans bool) (affected int64, err error) {
-	if trans && orm.db != nil {
-		tx, errTx := orm.db.BeginTx(orm.ctx, nil)
+	if trans && orm.executor != nil {
+		tx, errTx := orm.executor.BeginTx(orm.ctx, nil)
 		if errTx != nil {
 			return 0, errTx
 		}
@@ -256,8 +256,8 @@ func (orm *ORM) executeSQL(sqlArr []interface{}, trans bool) (affected int64, er
 		for _, sqlStr := range sqlArr {
 			if orm.tx != nil {
 				execContext, err = orm.tx.ExecContext(orm.ctx, sqlStr.(string))
-			} else if orm.db != nil {
-				execContext, err = orm.db.ExecContext(orm.ctx, sqlStr.(string))
+			} else if orm.executor != nil {
+				execContext, err = orm.executor.ExecContext(orm.ctx, sqlStr.(string))
 			} else {
 				panic(ErrClient)
 			}

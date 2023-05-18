@@ -1,4 +1,6 @@
 github.com/assembly-hub/basics v1.2.5 h1:3THTYEQAOV+skqiJ1Fg4ByujIKd/mYOMbKTErM4lQrI=
 github.com/assembly-hub/basics v1.2.5/go.mod h1:WJXeuFaAjuYApscn3Gu6zUrDlfWmrhWR6vm50yTd/GY=
+github.com/assembly-hub/db v1.1.0 h1:qseNwnREKkvXl5qsnDiIhuHzcDpzsX1NmNyPhZg97ZM=
+github.com/assembly-hub/db v1.1.0/go.mod h1:9+dcqnoroxIHLj6mscB4T6oeEU85yFGahgjl65IKJis=
 github.com/assembly-hub/task v1.1.0 h1:iNzKjgNz9+iWJzK3duemdmW06sCnQRBJwCMhPKqAskA=
 github.com/assembly-hub/task v1.1.0/go.mod h1:Aal81pmfeMKVBiBsrJ6Xsp8tqLoQ18QT1ynZsqiICrw=

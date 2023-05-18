@@ -2,15 +2,16 @@ package orm
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/assembly-hub/db"
 )
 
-func scanMapList(rows *sql.Rows, flat bool, colLinkStr string, cacheLen int) (result []map[string]interface{}, err error) {
+func scanMapList(rows db.Rows, flat bool, colLinkStr string, cacheLen int) (result []map[string]interface{}, err error) {
 	if rows != nil {
-		defer func(rows *sql.Rows) {
+		defer func(rows db.Rows) {
 			closeErr := rows.Close()
 			if err != nil {
 				err = fmt.Errorf("%w %v", err, closeErr)
@@ -63,7 +64,7 @@ func scanMapList(rows *sql.Rows, flat bool, colLinkStr string, cacheLen int) (re
 	return result, nil
 }
 
-func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool, dataValue *reflect.Value) error {
+func toListData(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, flat bool, dataValue *reflect.Value) error {
 	elemType := dataValue.Type().Elem()
 
 	elemPtr := false
@@ -74,7 +75,7 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool, da
 
 	switch elemType.Kind() {
 	case reflect.Map:
-		ret, err := toListDataMap(ctx, db, tx, q, flat, elemType, elemPtr)
+		ret, err := toListDataMap(ctx, sqlDB, q, flat, elemType, elemPtr)
 		if err != nil {
 			return err
 		}
@@ -91,7 +92,7 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool, da
 			}
 			structData = ptr
 		}
-		ret, err := toListStruct(ctx, db, tx, q, flat, structData, elemPtr)
+		ret, err := toListStruct(ctx, sqlDB, q, flat, structData, elemPtr)
 		if err != nil {
 			return err
 		}
@@ -100,7 +101,7 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool, da
 			dataValue.Set(*ret)
 		}
 	default:
-		ret, err := toListSingleData(ctx, db, tx, q, elemType)
+		ret, err := toListSingleData(ctx, sqlDB, q, elemType)
 		if err != nil {
 			return err
 		}
@@ -113,7 +114,7 @@ func toListData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool, da
 	return nil
 }
 
-func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{}, flat bool) error {
+func toData(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, result interface{}, flat bool) error {
 	dataValue := reflect.ValueOf(result)
 	if nil == result || dataValue.IsNil() || dataValue.Type().Kind() != reflect.Ptr {
 		return ErrTargetNotSettable
@@ -127,9 +128,9 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 	tp := dataValue.Type()
 	switch tp.Kind() {
 	case reflect.Slice:
-		return toListData(ctx, db, tx, q, flat, &dataValue)
+		return toListData(ctx, sqlDB, q, flat, &dataValue)
 	case reflect.Map:
-		ret, err := toFirstDataMap(ctx, db, tx, q, flat, tp)
+		ret, err := toFirstDataMap(ctx, sqlDB, q, flat, tp)
 		if err != nil {
 			return err
 		}
@@ -146,7 +147,7 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 			}
 			structData = ptr
 		}
-		ret, err := toFirstStruct(ctx, db, tx, q, flat, structData)
+		ret, err := toFirstStruct(ctx, sqlDB, q, flat, structData)
 		if err != nil {
 			return err
 		}
@@ -155,7 +156,7 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 			dataValue.Set(*ret)
 		}
 	default:
-		ret, err := toFirstSingleData(ctx, db, tx, q, tp)
+		ret, err := toFirstSingleData(ctx, sqlDB, q, tp)
 		if err != nil {
 			return err
 		}
@@ -168,7 +169,7 @@ func toData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, result interface{
 	return nil
 }
 
-func toFirstDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
+func toFirstDataMap(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, flat bool,
 	elemType reflect.Type) (*reflect.Value, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -186,12 +187,10 @@ func toFirstDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool
 		q.Limit = []uint{1}
 	}
 
-	var rows *sql.Rows
+	var rows db.Rows
 	var err error
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
+	if sqlDB != nil {
+		rows, err = sqlDB.QueryContext(ctx, q.SQL())
 	} else {
 		return nil, ErrClient
 	}
@@ -213,7 +212,7 @@ func toFirstDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool
 	return &elem, nil
 }
 
-func toListDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
+func toListDataMap(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, flat bool,
 	elemType reflect.Type, elemPtr bool) (*reflect.Value, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -224,12 +223,10 @@ func toListDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 		return nil, ErrMapKeyType
 	}
 
-	var rows *sql.Rows
+	var rows db.Rows
 	var err error
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
+	if sqlDB != nil {
+		rows, err = sqlDB.QueryContext(ctx, q.SQL())
 	} else {
 		return nil, ErrClient
 	}
@@ -257,10 +254,10 @@ func toListDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 	return result, nil
 }
 
-func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
+func scanDataMapList(rows db.Rows, flat bool, colLinkStr string,
 	cacheLen int, elemType reflect.Type, elemPtr bool) (result *reflect.Value, err error) {
 	if rows != nil {
-		defer func(rows *sql.Rows) {
+		defer func(rows db.Rows) {
 			closeErr := rows.Close()
 			if err != nil {
 				err = fmt.Errorf("%w %v", err, closeErr)
@@ -350,18 +347,16 @@ func scanDataMapList(rows *sql.Rows, flat bool, colLinkStr string,
 	return result, nil
 }
 
-func toListStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
+func toListStruct(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, flat bool,
 	structData *tableStructData, elemPtr bool) (*reflect.Value, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	var rows *sql.Rows
+	var rows db.Rows
 	var err error
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
+	if sqlDB != nil {
+		rows, err = sqlDB.QueryContext(ctx, q.SQL())
 	} else {
 		return nil, ErrClient
 	}
@@ -388,7 +383,7 @@ func toListStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 	return result, nil
 }
 
-func toFirstStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
+func toFirstStruct(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, flat bool,
 	structData *tableStructData) (*reflect.Value, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -401,12 +396,10 @@ func toFirstStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 		q.Limit = []uint{1}
 	}
 
-	var rows *sql.Rows
+	var rows db.Rows
 	var err error
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
+	if sqlDB != nil {
+		rows, err = sqlDB.QueryContext(ctx, q.SQL())
 	} else {
 		return nil, ErrClient
 	}
@@ -428,10 +421,10 @@ func toFirstStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 	return &elem, nil
 }
 
-func scanDataStructList(rows *sql.Rows, flat bool, q *BaseQuery,
+func scanDataStructList(rows db.Rows, flat bool, q *BaseQuery,
 	cacheLen int, structData *tableStructData, elemPtr bool) (result *reflect.Value, err error) {
 	if rows != nil {
-		defer func(rows *sql.Rows) {
+		defer func(rows db.Rows) {
 			closeErr := rows.Close()
 			if err != nil {
 				err = fmt.Errorf("%w %v", err, closeErr)
@@ -544,7 +537,7 @@ func scanDataStructList(rows *sql.Rows, flat bool, q *BaseQuery,
 	return result, nil
 }
 
-func toFirstSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp reflect.Type) (ret *reflect.Value, err error) {
+func toFirstSingleData(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, tp reflect.Type) (ret *reflect.Value, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -555,11 +548,9 @@ func toFirstSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp ref
 		q.Limit = []uint{1}
 	}
 
-	var rows *sql.Rows
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
+	var rows db.Rows
+	if sqlDB != nil {
+		rows, err = sqlDB.QueryContext(ctx, q.SQL())
 	} else {
 		return nil, ErrClient
 	}
@@ -581,16 +572,14 @@ func toFirstSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp ref
 	return &elem, nil
 }
 
-func toListSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp reflect.Type) (ret *reflect.Value, err error) {
+func toListSingleData(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, tp reflect.Type) (ret *reflect.Value, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	var rows *sql.Rows
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
+	var rows db.Rows
+	if sqlDB != nil {
+		rows, err = sqlDB.QueryContext(ctx, q.SQL())
 	} else {
 		return nil, ErrClient
 	}
@@ -617,9 +606,9 @@ func toListSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp refl
 	return result, nil
 }
 
-func scanSingleList(rows *sql.Rows, cacheLen int, tp reflect.Type) (result *reflect.Value, err error) {
+func scanSingleList(rows db.Rows, cacheLen int, tp reflect.Type) (result *reflect.Value, err error) {
 	if rows != nil {
-		defer func(rows *sql.Rows) {
+		defer func(rows db.Rows) {
 			closeErr := rows.Close()
 			if err != nil {
 				err = fmt.Errorf("%w %v", err, closeErr)

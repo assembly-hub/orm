@@ -2,11 +2,11 @@
 package orm
 
 import (
-	"database/sql"
+	"github.com/assembly-hub/db"
 )
 
-type Tx = sql.Tx
-type DB = sql.DB
+type Tx = db.Tx
+type DB = db.Executor
 
 type Where = map[string]interface{}
 type Select = []string

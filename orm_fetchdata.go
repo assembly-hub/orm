@@ -2,13 +2,14 @@ package orm
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/assembly-hub/db"
 )
 
-func fetchData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, dataType interface{}, flat bool,
+func fetchData(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, dataType interface{}, flat bool,
 	fetch func(interface{}) bool) error {
 	dtType := reflect.TypeOf(dataType)
 	if dtType.Kind() == reflect.Ptr {
@@ -21,7 +22,7 @@ func fetchData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, dataType inter
 
 	switch dtType.Kind() {
 	case reflect.Map:
-		return toFetchDataMap(ctx, db, tx, q, flat, dtType, fetch)
+		return toFetchDataMap(ctx, sqlDB, q, flat, dtType, fetch)
 	case reflect.Struct:
 		structData := q.RefConf.getTableCacheByTp(dtType)
 		if structData == nil {
@@ -31,13 +32,13 @@ func fetchData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, dataType inter
 			}
 			structData = ptr
 		}
-		return toFetchStruct(ctx, db, tx, q, flat, structData, fetch)
+		return toFetchStruct(ctx, sqlDB, q, flat, structData, fetch)
 	default:
-		return toFetchSingleData(ctx, db, tx, q, dtType, fetch)
+		return toFetchSingleData(ctx, sqlDB, q, dtType, fetch)
 	}
 }
 
-func toFetchDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
+func toFetchDataMap(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, flat bool,
 	dtType reflect.Type, fetch func(interface{}) bool) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -48,12 +49,10 @@ func toFetchDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool
 		return ErrMapKeyType
 	}
 
-	var rows *sql.Rows
+	var rows db.Rows
 	var err error
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
+	if sqlDB != nil {
+		rows, err = sqlDB.QueryContext(ctx, q.SQL())
 	} else {
 		return ErrClient
 	}
@@ -65,10 +64,10 @@ func toFetchDataMap(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool
 	return scanFetchDataMap(rows, flat, q.SelectColLinkStr, dtType, fetch)
 }
 
-func scanFetchDataMap(rows *sql.Rows, flat bool, colLinkStr string,
+func scanFetchDataMap(rows db.Rows, flat bool, colLinkStr string,
 	elemType reflect.Type, fetch func(interface{}) bool) (err error) {
 	if rows != nil {
-		defer func(rows *sql.Rows) {
+		defer func(rows db.Rows) {
 			closeErr := rows.Close()
 			if err != nil {
 				err = fmt.Errorf("%w %v", err, closeErr)
@@ -140,18 +139,16 @@ func scanFetchDataMap(rows *sql.Rows, flat bool, colLinkStr string,
 	return nil
 }
 
-func toFetchStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
+func toFetchStruct(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, flat bool,
 	structData *tableStructData, fetch func(interface{}) bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	var rows *sql.Rows
+	var rows db.Rows
 	var err error
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
+	if sqlDB != nil {
+		rows, err = sqlDB.QueryContext(ctx, q.SQL())
 	} else {
 		return ErrClient
 	}
@@ -163,10 +160,10 @@ func toFetchStruct(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, flat bool,
 	return scanFetchDataStruct(rows, flat, q, structData, fetch)
 }
 
-func scanFetchDataStruct(rows *sql.Rows, flat bool, q *BaseQuery,
+func scanFetchDataStruct(rows db.Rows, flat bool, q *BaseQuery,
 	structData *tableStructData, fetch func(interface{}) bool) (err error) {
 	if rows != nil {
-		defer func(rows *sql.Rows) {
+		defer func(rows db.Rows) {
 			closeErr := rows.Close()
 			if err != nil {
 				err = fmt.Errorf("%w %v", err, closeErr)
@@ -264,17 +261,15 @@ func scanFetchDataStruct(rows *sql.Rows, flat bool, q *BaseQuery,
 	return nil
 }
 
-func toFetchSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp reflect.Type,
+func toFetchSingleData(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery, tp reflect.Type,
 	fetch func(interface{}) bool) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	var rows *sql.Rows
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.SQL())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.SQL())
+	var rows db.Rows
+	if sqlDB != nil {
+		rows, err = sqlDB.QueryContext(ctx, q.SQL())
 	} else {
 		return ErrClient
 	}
@@ -286,9 +281,9 @@ func toFetchSingleData(ctx context.Context, db *DB, tx *Tx, q *BaseQuery, tp ref
 	return scanFetchSingle(rows, tp, fetch)
 }
 
-func scanFetchSingle(rows *sql.Rows, tp reflect.Type, fetch func(interface{}) bool) (err error) {
+func scanFetchSingle(rows db.Rows, tp reflect.Type, fetch func(interface{}) bool) (err error) {
 	if rows != nil {
-		defer func(rows *sql.Rows) {
+		defer func(rows db.Rows) {
 			closeErr := rows.Close()
 			if err != nil {
 				err = fmt.Errorf("%w %v", err, closeErr)

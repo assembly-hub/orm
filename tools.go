@@ -7,10 +7,11 @@ import (
 
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
+	"github.com/assembly-hub/db"
 )
 
-func TransSession(ctx context.Context, db *DB, f func(ctx context.Context, tx *Tx) error) (err error) {
-	tx, errTx := db.BeginTx(ctx, nil)
+func TransSession(ctx context.Context, sqlDB db.Executor, f func(ctx context.Context, tx db.Tx) error) (err error) {
+	tx, errTx := sqlDB.BeginTx(ctx, nil)
 	if errTx != nil {
 		return errTx
 	}

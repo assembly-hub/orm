@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-var ErrClient = fmt.Errorf("db and tx are all nil")
+var ErrClient = fmt.Errorf("executor and tx are all nil")
 var ErrTargetNotSettable = errors.New("[scanner]: target is not settable! a pointer is required")
 var ErrFetchType = errors.New("[fetch]: datatype is not a pointer, int string map struct is required")
 var ErrBetweenValueMatch = errors.New("[between]: the parameter array length is required to be 2")

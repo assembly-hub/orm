@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/assembly-hub/basics/util"
+	"github.com/assembly-hub/db"
 )
 
 const (
@@ -212,16 +213,14 @@ func dataInStructField(obj *reflect.Value, reflectVal reflect.Value, fieldIndex 
 	}
 }
 
-func count(ctx context.Context, db *DB, tx *Tx, q *BaseQuery) (int64, error) {
+func count(ctx context.Context, sqlDB db.BaseExecutor, q *BaseQuery) (int64, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var rows *sql.Rows
+	var rows db.Rows
 	var err error
-	if tx != nil {
-		rows, err = tx.QueryContext(ctx, q.Count())
-	} else if db != nil {
-		rows, err = db.QueryContext(ctx, q.Count())
+	if sqlDB != nil {
+		rows, err = sqlDB.QueryContext(ctx, q.Count())
 	} else {
 		return 0, ErrClient
 	}
