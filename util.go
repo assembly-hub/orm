@@ -37,7 +37,7 @@ func str2Time(s string) time.Time {
 	return t
 }
 
-func prepareValues(values []interface{}, columnTypes []*sql.ColumnType, columns []string) {
+func prepareValues(values []interface{}, columnTypes []db.ColumnType, columns []string) {
 	if len(columnTypes) > 0 {
 		for idx, columnType := range columnTypes {
 			values[idx] = newDataByDBType(columnType)
@@ -49,7 +49,7 @@ func prepareValues(values []interface{}, columnTypes []*sql.ColumnType, columns 
 	}
 }
 
-func newDataByDBType(columnType *sql.ColumnType) interface{} {
+func newDataByDBType(columnType db.ColumnType) interface{} {
 	if columnType != nil && columnType.ScanType() != nil {
 		return reflect.New(reflect.PtrTo(columnType.ScanType())).Interface()
 	}
