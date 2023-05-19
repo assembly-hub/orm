@@ -2,11 +2,11 @@ package orm
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"testing"
 	"time"
 
+	db2 "github.com/assembly-hub/db"
 	"github.com/assembly-hub/orm/dbtype"
 )
 
@@ -50,7 +50,7 @@ func init() {
 }
 
 func TestORM_Query(t *testing.T) {
-	var db *sql.DB = &sql.DB{}
+	var db db2.Executor
 	orm := NewORM(context.Background(), "table1", db, ref)
 	orm.Select("tb2.count(id) as c", "id")
 	orm.Wheres(map[string]interface{}{
@@ -63,7 +63,7 @@ func TestORM_Query(t *testing.T) {
 }
 
 func TestORM(t *testing.T) {
-	var db *sql.DB = &sql.DB{}
+	var db db2.Executor
 	orm := NewORM(context.Background(), "table1", db, ref)
 	_, err := orm.ReplaceManySameClos([]interface{}{map[string]interface{}{
 		"id":   1,
@@ -79,7 +79,7 @@ func TestORM(t *testing.T) {
 }
 
 func TestORM2(t *testing.T) {
-	var db *sql.DB = &sql.DB{}
+	var db db2.Executor
 	orm := NewORM(context.Background(), "table1", db, ref)
 
 	_, err := orm.ReplaceOne(map[string]interface{}{
@@ -92,7 +92,7 @@ func TestORM2(t *testing.T) {
 }
 
 func TestORM3(t *testing.T) {
-	var db *sql.DB = &sql.DB{}
+	var db db2.Executor
 	orm := NewORM(context.Background(), "table1", db, ref)
 
 	orm.Wheres(Where{

@@ -163,6 +163,25 @@ func initORM() *ORM {
 	return dao
 }
 
+// GetExecutor 获取原始的数据库链接
+func (orm *ORM) GetExecutor() db.Executor {
+	return orm.executor
+}
+
+// GetTx 获取原始的Tx链接
+func (orm *ORM) GetTx() db.Tx {
+	return orm.tx
+}
+
+// GetBaseExecutor 获取原始的数据库链接或Tx
+// conn 按需断言
+func (orm *ORM) GetBaseExecutor() (conn db.BaseExecutor, isTx bool) {
+	if orm.tx != nil {
+		return orm.tx, true
+	}
+	return orm.executor, false
+}
+
 // SetDefLimit 修改默认limit
 func (orm *ORM) SetDefLimit(n uint) *ORM {
 	orm.limit = n
