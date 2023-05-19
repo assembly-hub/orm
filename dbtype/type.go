@@ -18,4 +18,5 @@ const (
 	SQLite3
 	// Oracle 字符集排序规则，默认采用大小写区分模式
 	Oracle
+	ClickHouse
 )

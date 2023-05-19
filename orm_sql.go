@@ -23,7 +23,8 @@ func (orm *ORM) formatUpdateSQL(data interface{}) (string, error) {
 
 func (orm *ORM) formatInsertManySQL(dataList []interface{}, cols []string) (string, error) {
 	switch orm.ref.dbConf.DBType {
-	case dbtype.MySQL, dbtype.MariaDB, dbtype.SQLServer, dbtype.SQLite2, dbtype.SQLite3, dbtype.Postgres, dbtype.OpenGauss:
+	case dbtype.MySQL, dbtype.MariaDB, dbtype.SQLServer, dbtype.SQLite2,
+		dbtype.SQLite3, dbtype.Postgres, dbtype.OpenGauss, dbtype.ClickHouse:
 		return orm.innerInsertOrReplaceManySQL("insert", dataList, cols)
 	case dbtype.Oracle:
 		return orm.oracleInsertManySQL(dataList, cols)

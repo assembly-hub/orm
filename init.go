@@ -25,6 +25,8 @@ func init() {
 		Esc:      "\\",
 		BinStr:   "binary", // 数据库不区分大小写；放在数据之前，强制区分大小写
 	}
+	dbConfMap[dbtype.ClickHouse] = dbConfMap[dbtype.MySQL]
+
 	dbConfMap[dbtype.MariaDB] = &dbCoreData{
 		DBType:   dbtype.MariaDB,
 		StrEsc:   "'",
