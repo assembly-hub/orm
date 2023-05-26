@@ -178,7 +178,7 @@ func (p *queryModel) innerBinFormatSubSQL(colOperator string, colName string, va
 	colData interface{}) string {
 	subSQL := ""
 	switch p.DBCore.DBType {
-	case dbtype.MySQL, dbtype.MariaDB:
+	case dbtype.MySQL, dbtype.MariaDB, dbtype.ClickHouse:
 		subSQL = p.mysqlBinFormatSubSQL(colOperator, colName, val, rawVal, rawStrArr, colData)
 	case dbtype.SQLServer:
 		subSQL = p.sqlserverBinFormatSubSQL(colOperator, colName, val, rawVal, rawStrArr, colData)
@@ -199,7 +199,7 @@ func (p *queryModel) innerIgnoreFormatSubSQL(colOperator string, colName string,
 		subSQL = p.oracleIgnoreFormatSubSQL(colOperator, colName, val, rawVal, rawStrArr, colData)
 	case dbtype.Postgres, dbtype.OpenGauss:
 		subSQL = p.postgresIgnoreFormatSubSQL(colOperator, colName, val, rawVal, rawStrArr, colData)
-	case dbtype.MySQL, dbtype.MariaDB, dbtype.SQLServer:
+	case dbtype.MySQL, dbtype.MariaDB, dbtype.SQLServer, dbtype.ClickHouse:
 		subSQL = p.innerFormatSubSQL(colOperator, colName, val, rawVal, rawStrArr, colData)
 	}
 	return subSQL

@@ -531,7 +531,6 @@ func scanDataStructList(rows db.Rows, flat bool, q *BaseQuery,
 		} else {
 			elemList = reflect.Append(elemList, structVal)
 		}
-
 	}
 
 	return result, nil

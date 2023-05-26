@@ -500,7 +500,8 @@ func (p *queryModel) Count() string {
 
 func (p *queryModel) SQL() string {
 	switch p.DBCore.DBType {
-	case dbtype.MySQL, dbtype.MariaDB, dbtype.OpenGauss, dbtype.Postgres:
+	case dbtype.MySQL, dbtype.MariaDB, dbtype.OpenGauss,
+		dbtype.Postgres, dbtype.ClickHouse:
 		return p.queryMySQL()
 	case dbtype.SQLite2, dbtype.SQLite3:
 		return p.querySQLite()
