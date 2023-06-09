@@ -177,6 +177,12 @@ func (orm *ORM) GetTx() db.Tx {
 	return orm.tx
 }
 
+func (orm *ORM) Logger(logger log.Log) {
+	if logger != nil {
+		orm.logger = logger
+	}
+}
+
 // GetBaseExecutor 获取原始的数据库链接或Tx
 // conn 按需断言
 func (orm *ORM) GetBaseExecutor() (conn db.BaseExecutor, isTx bool) {
@@ -261,6 +267,7 @@ func (orm *ORM) Clone(ctx context.Context) *ORM {
 	dao.Q = newDBQuery()
 	dao.ctx = ctx
 	dao.primaryKey = orm.primaryKey
+	dao.logger = orm.logger
 	return dao
 }
 
