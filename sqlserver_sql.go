@@ -331,7 +331,7 @@ func (orm *ORM) sqlserverUpsertSQL(data interface{}) (string, error) {
 				formatCols = append(formatCols, formatKey.String())
 				rawColSet.Add(k)
 
-				val := util.InterfaceToString(v)
+				val := util.Any2String(v)
 				rawVal = append(rawVal, val)
 				continue
 			}
@@ -588,7 +588,7 @@ func (orm *ORM) sqlserverUpsertManySQL(dataList []interface{}, cols []string) (s
 
 				subVal = append(subVal, val)
 			} else if v, ok = valMap["#"+colName]; ok {
-				subVal = append(subVal, util.InterfaceToString(v))
+				subVal = append(subVal, util.Any2String(v))
 			} else {
 				subVal = append(subVal, "null")
 			}

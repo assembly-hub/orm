@@ -325,7 +325,7 @@ func (orm *ORM) sqliteUpsertSQL(data interface{}) (string, error) {
 
 				colSet.Add(k)
 				formatCols = append(formatCols, formatKey.String())
-				values = append(values, util.InterfaceToString(v))
+				values = append(values, util.Any2String(v))
 				continue
 			}
 
@@ -537,7 +537,7 @@ func (orm *ORM) sqliteUpsertManySQL(dataList []interface{}, cols []string) (stri
 
 				subVal.WriteString(val)
 			} else if v, ok = valMap["#"+cols[i]]; ok {
-				subVal.WriteString(util.InterfaceToString(v))
+				subVal.WriteString(util.Any2String(v))
 			} else {
 				subVal.WriteString("null")
 			}

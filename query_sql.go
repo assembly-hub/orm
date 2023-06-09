@@ -400,7 +400,7 @@ func (orm *ORM) innerInsertOrReplaceSQL(tp string, data interface{}) (string, er
 				formatKey.WriteString(dbCore.EscEnd)
 
 				cols = append(cols, formatKey.String())
-				values = append(values, util.InterfaceToString(v))
+				values = append(values, util.Any2String(v))
 				continue
 			}
 
@@ -553,7 +553,7 @@ func (orm *ORM) innerInsertOrReplaceManySQL(tp string, dataList []interface{}, c
 
 				subVal.WriteString(val)
 			} else if v, ok = valMap["#"+cols[i]]; ok {
-				subVal.WriteString(util.InterfaceToString(v))
+				subVal.WriteString(util.Any2String(v))
 			} else {
 				subVal.WriteString("null")
 			}
@@ -618,7 +618,7 @@ func (orm *ORM) innerUpdateSQL(data interface{}) (string, error) {
 					return "", err
 				}
 
-				strVal := util.InterfaceToString(v)
+				strVal := util.Any2String(v)
 
 				var formatSet strings.Builder
 				formatSet.Grow(escLen + len(k) + len(strVal) + 1)

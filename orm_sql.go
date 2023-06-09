@@ -187,13 +187,13 @@ func (orm *ORM) formatValue(raw interface{}) (ret string, timeEmpty bool) {
 			ret = "0"
 		}
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
-		ret = util.InterfaceToString(raw)
+		ret = util.Any2String(raw)
 	default:
 		def := reflect.ValueOf(raw)
 		if def.Type().Kind() == reflect.String {
 			ret = def.String()
 		} else {
-			ret = util.InterfaceToString(raw)
+			ret = util.Any2String(raw)
 		}
 
 		ret = strings.ReplaceAll(ret, "'", "''")

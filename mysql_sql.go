@@ -353,7 +353,7 @@ func (orm *ORM) mysqlUpsertSQL(data interface{}) (string, error) {
 				formatKey.WriteString(dbCore.EscEnd)
 
 				formatCols = append(formatCols, formatKey.String())
-				values = append(values, util.InterfaceToString(v))
+				values = append(values, util.Any2String(v))
 				continue
 			}
 
@@ -516,7 +516,7 @@ func (orm *ORM) mysqlUpsertManySQL(dataList []interface{}, cols []string) (strin
 
 				subVal.WriteString(val)
 			} else if v, ok = valMap["#"+cols[i]]; ok {
-				subVal.WriteString(util.InterfaceToString(v))
+				subVal.WriteString(util.Any2String(v))
 			} else {
 				subVal.WriteString("null")
 			}

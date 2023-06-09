@@ -386,7 +386,7 @@ func (orm *ORM) oracleInsertManySQL(dataList []interface{}, cols []string) (stri
 
 				subVal.WriteString(val)
 			} else if v, ok = valMap["#"+cols[i]]; ok {
-				subVal.WriteString(util.InterfaceToString(v))
+				subVal.WriteString(util.Any2String(v))
 			} else {
 				subVal.WriteString("null")
 			}
@@ -441,7 +441,7 @@ func (orm *ORM) oracleUpsertSQL(data interface{}) (string, error) {
 				formatCols = append(formatCols, formatKey.String())
 				rawColSet.Add(k)
 
-				val := util.InterfaceToString(v)
+				val := util.Any2String(v)
 				rawVal = append(rawVal, val)
 				continue
 			}
@@ -700,7 +700,7 @@ func (orm *ORM) oracleUpsertManySQL(dataList []interface{}, cols []string) (stri
 
 				subVal = append(subVal, val)
 			} else if v, ok = valMap["#"+colName]; ok {
-				subVal = append(subVal, util.InterfaceToString(v))
+				subVal = append(subVal, util.Any2String(v))
 			} else {
 				subVal = append(subVal, "null")
 			}

@@ -58,7 +58,7 @@ func Struct2Map(raw interface{}, excludeKey ...string) map[string]interface{} {
 
 		if !s.Has(colName) {
 			if tp == "json" {
-				m[colName] = util.InterfaceToString(dataValue.Field(i).Interface())
+				m[colName] = util.Any2String(dataValue.Field(i).Interface())
 			} else {
 				m[colName] = dataValue.Field(i).Interface()
 			}

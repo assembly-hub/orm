@@ -10,6 +10,8 @@ import (
 	"github.com/assembly-hub/basics/set"
 	"github.com/assembly-hub/basics/util"
 	"github.com/assembly-hub/db"
+	"github.com/assembly-hub/log"
+	"github.com/assembly-hub/log/empty"
 	"github.com/assembly-hub/task/execute"
 
 	"github.com/assembly-hub/orm/dbtype"
@@ -96,7 +98,8 @@ type ORM struct {
 	limit uint
 
 	// 查询配置数据
-	Q *databaseQuery
+	Q      *databaseQuery
+	logger log.Log
 }
 
 type Paging struct {
@@ -160,6 +163,7 @@ func initORM() *ORM {
 	dao.Q = newDBQuery()
 	dao.primaryKey = defaultPrimaryKey
 	dao.limit = 0
+	dao.logger = empty.NoLog
 	return dao
 }
 
@@ -239,9 +243,9 @@ func (orm *ORM) Query(pair ...interface{}) *ORM {
 
 		switch v := pair[i*2+1].(type) {
 		case *ORM:
-			orm.Q.Where[util.InterfaceToString(pair[i*2])] = v.cond(false)
+			orm.Q.Where[util.Any2String(pair[i*2])] = v.cond(false)
 		default:
-			orm.Q.Where[util.InterfaceToString(pair[i*2])] = v
+			orm.Q.Where[util.Any2String(pair[i*2])] = v
 		}
 	}
 	return orm
@@ -886,16 +890,18 @@ func (orm *ORM) InsertManySameClos(data []interface{}, cols []string, batchSize 
 
 	dataLen := len(data)
 	sqlTask := execute.NewExecutor("sql task")
+	sqlTask.Logger(orm.logger)
+
 	for i := 0; i < dataLen; i += batchSize {
 		ends := i + batchSize
 		if ends > dataLen {
 			ends = dataLen
 		}
 
-		sqlTask.AddSimpleTask(orm.formatInsertManySQL, data[i:ends], cols)
+		sqlTask.AddFlexible(orm.formatInsertManySQL, data[i:ends], cols)
 	}
 
-	sqlArr, taskErrList, err := sqlTask.ExecuteTaskWithErr()
+	sqlArr, taskErrList, err := sqlTask.ExecuteWithErr(orm.ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -1081,16 +1087,17 @@ func (orm *ORM) UpsertManySameClos(data []interface{}, cols []string, batchSize 
 
 	dataLen := len(data)
 	sqlTask := execute.NewExecutor("sql task")
+	sqlTask.Logger(orm.logger)
 	for i := 0; i < dataLen; i += batchSize {
 		ends := i + batchSize
 		if ends > dataLen {
 			ends = dataLen
 		}
 
-		sqlTask.AddSimpleTask(orm.formatUpsertManySQL, data[i:ends], cols)
+		sqlTask.AddFlexible(orm.formatUpsertManySQL, data[i:ends], cols)
 	}
 
-	sqlArr, taskErrList, err := sqlTask.ExecuteTaskWithErr()
+	sqlArr, taskErrList, err := sqlTask.ExecuteWithErr(orm.ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -1557,16 +1564,18 @@ func (orm *ORM) ReplaceManySameClos(data []interface{}, cols []string, batchSize
 
 	dataLen := len(data)
 	sqlTask := execute.NewExecutor("sql task")
+	sqlTask.Logger(orm.logger)
+
 	for i := 0; i < dataLen; i += batchSize {
 		ends := i + batchSize
 		if ends > dataLen {
 			ends = dataLen
 		}
 
-		sqlTask.AddSimpleTask(orm.formatReplaceManySQL, data[i:ends], cols)
+		sqlTask.AddFlexible(orm.formatReplaceManySQL, data[i:ends], cols)
 	}
 
-	sqlArr, taskErrList, err := sqlTask.ExecuteTaskWithErr()
+	sqlArr, taskErrList, err := sqlTask.ExecuteWithErr(orm.ctx)
 	if err != nil {
 		return 0, err
 	}
