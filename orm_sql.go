@@ -157,13 +157,14 @@ func (orm *ORM) formatValue(raw interface{}) (ret string, timeEmpty bool) {
 		}
 
 		ret = time2Str(raw)
-		strBuf.Grow(len(ret) + 2)
-		strBuf.WriteByte('\'')
-		strBuf.WriteString(ret)
-		strBuf.WriteByte('\'')
-		ret = strBuf.String()
 		if orm.ref.dbConf.DBType == dbtype.Oracle {
 			ret = oracleDateTime(ret, false)
+		} else {
+			strBuf.Grow(len(ret) + 2)
+			strBuf.WriteByte('\'')
+			strBuf.WriteString(ret)
+			strBuf.WriteByte('\'')
+			ret = strBuf.String()
 		}
 	case *time.Time:
 		if raw.IsZero() {
@@ -172,13 +173,14 @@ func (orm *ORM) formatValue(raw interface{}) (ret string, timeEmpty bool) {
 		}
 
 		ret = time2Str(*raw)
-		strBuf.Grow(len(ret) + 2)
-		strBuf.WriteByte('\'')
-		strBuf.WriteString(ret)
-		strBuf.WriteByte('\'')
-		ret = strBuf.String()
 		if orm.ref.dbConf.DBType == dbtype.Oracle {
 			ret = oracleDateTime(ret, false)
+		} else {
+			strBuf.Grow(len(ret) + 2)
+			strBuf.WriteByte('\'')
+			strBuf.WriteString(ret)
+			strBuf.WriteByte('\'')
+			ret = strBuf.String()
 		}
 	case bool:
 		if raw {
