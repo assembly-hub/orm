@@ -337,12 +337,12 @@ where count(`table2`.id)>1
 ### 24、# 原始字段限定符
 > 表明被 # 修饰的字段不进行 tag 规则计算，不进行格式化的计算等操作
 
-> tb1.Wheres("#tb2.count(id)__gt", 1)
+> tb1.Wheres("#count(tb2_id)__gt", 1)
 
 对应sql
 ```sql
 select * from `table1` left join `table2` on `table1`.ref=`table2`.id
-where tb2.count(id)>1
+where count(tb2_id)>1
 ```
 
 ### 25、 ~ 取反操作符
@@ -593,7 +593,7 @@ type Paging struct {
 
 ## 八、事务 orm.TransSession
 ```go
-err = orm.TransSession(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
+err = orm.TransSession(ctx, dbConn, func(ctx context.Context, tx db.Tx) error {
     sessTb1 := orm.NewORMWithTx(ctx, "table1", tx, mysqlRef)
     _, err = sessTb1.InsertOne(map[string]interface{}{
         "name": "test",
