@@ -50,7 +50,13 @@ ref.BuildRefs()
 ## 二、查询算子（每个算子前面需要用双下划线标注）
 **以下所有算子均可在where、order、group、having中使用**
 > tb1 := orm.NewORM(ctx, "table1", db, ref)
-**查询有：Query Where Wheres方法，一下以 Where 为演示使用**
+
+**查询方法：Query、Where、Wheres方法，以下以 Where 为演示使用**
+
+> 基础算子在操作字符串时，支持：i_、ignore_（忽略大小写） 
+> 与 b_、bin_（区分大小写）【需要数据库支持】
+
+> 如：key__i_eq = 'str'，查询key等于str，忽略大小写
 
 ### 1、eq 等于（唯一一个可以省略的算子）
 > tb1.Where("id__eq", 1) or tb1.Where("id", 1)
