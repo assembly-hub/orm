@@ -384,7 +384,7 @@ Select 参数：* 主表所有字段；tag.* tag对应表所有字段；tag1.tag
 ```sql
 select sum(id) as `id_sum`, sum(`orm_tb2`.`id`) as tb2_id_count
 ```
-> sum(`orm_tb2`.`id`) as tb2_id_count\
+> sum(`orm_tb2`.`id`) as tb2_id_sum\
 > 其中 orm 为框架固定前缀 \
 > "_" 为链接符，默认为 "_", 可以自定义 tb1.SelectColLinkStr("自定义字符串") 除非很有不要，否则不建议修改
 
